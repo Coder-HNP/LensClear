@@ -1,17 +1,17 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
-import { DeviceProvider } from "./context/DeviceContext";
-import ProtectRoute from "./utils/ProtectRoute";
+import { AuthProvider } from "./context/AuthContext.jsx";
+import { DeviceProvider } from "./context/DeviceContext.jsx";
+import ProtectRoute from "./utils/ProtectRoute.jsx";
 
 // Pages
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import ForgotPassword from "./pages/ForgotPassword";
-import Dashboard from "./pages/Dashboard";
-import Devices from "./pages/Devices";
-import DeviceDetails from "./pages/DeviceDetails";
-import Logs from "./pages/Logs";
-import Settings from "./pages/Settings";
+import Login from "./pages/Login.jsx";
+import Register from "./pages/Register.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
+import Devices from "./pages/Devices.jsx";
+import DeviceDetails from "./pages/DeviceDetails.jsx";
+import Logs from "./pages/Logs.jsx";
+import Settings from "./pages/Settings.jsx";
 
 function App() {
   return (
