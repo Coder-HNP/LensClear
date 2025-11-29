@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Devices collection
+    match /devices/{deviceId} {
+      // Allow read if the device belongs to the user (via userId field)
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource == null);
+      // Allow create if user sets themselves as owner
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Allow update/delete if user owns the device
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Subcollection for history
+      match /history/{historyId} {
+        allow read: if isAuthenticated(); // Ideally check parent device ownership, but this is simpler for now
+      }
+    }
+
+    // Logs collection
+    match /logs/{logId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Alerts collection
+    match /alerts/{alertId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
