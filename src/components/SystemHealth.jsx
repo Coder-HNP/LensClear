@@ -1,4 +1,4 @@
-import { Activity, Cpu, Wifi, HardDrive, ShieldCheck } from "lucide-react";
+import { Activity, Thermometer, Gauge, Zap, ShieldCheck } from "lucide-react";
 import { useDevice } from "../context/DeviceContext";
 
 const HealthItem = ({ icon: Icon, label, status, value }) => (
@@ -11,8 +11,8 @@ const HealthItem = ({ icon: Icon, label, status, value }) => (
         </div>
         <div className="text-right">
             <div className={`text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1 ${status === 'good' ? 'bg-green-100 text-green-600' :
-                    status === 'warning' ? 'bg-orange-100 text-orange-600' :
-                        'bg-red-100 text-red-600'
+                status === 'warning' ? 'bg-orange-100 text-orange-600' :
+                    'bg-red-100 text-red-600'
                 }`}>
                 {status === 'good' ? 'Healthy' : status === 'warning' ? 'Warning' : 'Critical'}
             </div>
@@ -24,15 +24,15 @@ const HealthItem = ({ icon: Icon, label, status, value }) => (
 const SystemHealth = () => {
     const { currentDeviceData } = useDevice();
 
-    // Mock health data derived from device data
+    // Derive health status from actual ESP32 sensor data
     const getHealthStatus = () => {
-        if (!currentDeviceData) return { cpu: 'good', memory: 'good', wifi: 'good', firmware: 'good' };
+        if (!currentDeviceData) return { temperature: 'good', motor: 'good', vibration: 'good', power: 'good' };
 
         return {
-            cpu: currentDeviceData.temperature > 60 ? 'warning' : 'good',
-            memory: 'good', // Mock
-            wifi: currentDeviceData.signal < -80 ? 'warning' : 'good',
-            firmware: 'good'
+            temperature: currentDeviceData.temperature > 60 ? 'critical' : currentDeviceData.temperature > 45 ? 'warning' : 'good',
+            motor: currentDeviceData.rpm > 3000 ? 'warning' : 'good',
+            vibration: currentDeviceData.vibration > 0.5 ? 'critical' : currentDeviceData.vibration > 0.3 ? 'warning' : 'good',
+            power: currentDeviceData.power > 5 ? 'warning' : 'good'
         };
     };
 
@@ -47,28 +47,28 @@ const SystemHealth = () => {
 
             <div className="space-y-3">
                 <HealthItem
-                    icon={Cpu}
-                    label="CPU Load"
-                    status={health.cpu}
+                    icon={Thermometer}
+                    label="Temperature"
+                    status={health.temperature}
                     value={currentDeviceData ? `${currentDeviceData.temperature}°C` : '--'}
                 />
                 <HealthItem
-                    icon={HardDrive}
-                    label="Memory Usage"
-                    status={health.memory}
-                    value="42% Used"
-                />
-                <HealthItem
-                    icon={Wifi}
-                    label="Network Stability"
-                    status={health.wifi}
-                    value={currentDeviceData ? `${currentDeviceData.signal} dBm` : '--'}
+                    icon={Gauge}
+                    label="Motor Speed"
+                    status={health.motor}
+                    value={currentDeviceData ? `${currentDeviceData.rpm} RPM` : '--'}
                 />
                 <HealthItem
                     icon={Activity}
-                    label="Firmware Status"
-                    status={health.firmware}
-                    value="v2.1.0 (Latest)"
+                    label="Vibration Level"
+                    status={health.vibration}
+                    value={currentDeviceData ? `${currentDeviceData.vibration}g` : '--'}
+                />
+                <HealthItem
+                    icon={Zap}
+                    label="Power Consumption"
+                    status={health.power}
+                    value={currentDeviceData ? `${currentDeviceData.power} kW` : '--'}
                 />
             </div>
         </div>

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useAuth } from "./AuthContext";
-import { getUserDevices, subscribeToDeviceData, subscribeToAlerts } from "../utils/firestoreAPI";
+import { deviceAPI } from "../services/api";
+import socketService from "../services/socket";
 
 const DeviceContext = createContext({
     devices: [],
@@ -35,7 +36,7 @@ export const DeviceProvider = ({ children }) => {
     const [alerts, setAlerts] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // Subscribe to user's devices
+    // Fetch devices on mount
     useEffect(() => {
         if (!user) {
             setDevices([]);
@@ -43,73 +44,78 @@ export const DeviceProvider = ({ children }) => {
             return;
         }
 
-        let unsubscribe = () => { };
+        const fetchDevices = async () => {
+            try {
+                const response = await deviceAPI.getAll();
+                if (response.data.success) {
+                    const deviceList = response.data.devices.map(d => ({
+                        id: d.deviceId,
+                        name: d.name,
+                        status: d.status,
+                        lastOnline: d.lastSeen ? new Date(d.lastSeen) : null,
+                        type: d.type
+                    }));
+                    setDevices(deviceList);
 
-        try {
-            unsubscribe = getUserDevices(user.uid, (deviceList) => {
-                setDevices(deviceList);
-                // Auto-select first device if none selected
-                if (deviceList.length > 0 && !selectedDeviceId) {
-                    setSelectedDeviceId(deviceList[0].id);
+                    // Auto-select first device if none selected
+                    if (deviceList.length > 0 && !selectedDeviceId) {
+                        setSelectedDeviceId(deviceList[0].id);
+                    }
                 }
+            } catch (err) {
+                console.error("Failed to fetch devices:", err);
+            } finally {
                 setLoading(false);
-            });
-        } catch (error) {
-            console.error("Error subscribing to devices:", error);
-            setLoading(false);
-        }
-
-        return () => {
-            if (typeof unsubscribe === 'function') {
-                unsubscribe();
             }
         };
+
+        fetchDevices();
+
+        // Initialize Socket.io
+        socketService.initSocket(user.uid);
     }, [user]);
 
-    // Subscribe to selected device's live data
+    // Setup socket listeners with proper dependencies
+    useEffect(() => {
+        if (!user) return;
+
+        // Listen for device status updates
+        const handleDeviceStatus = (update) => {
+            console.log('Device status update:', update);
+            setDevices(prev => prev.map(d =>
+                d.id === update.deviceId
+                    ? { ...d, status: update.status, lastOnline: new Date(update.lastSeen) }
+                    : d
+            ));
+        };
+
+        // Listen for sensor data
+        const handleSensorData = (data) => {
+            console.log('Received sensor data:', data);
+            if (data.deviceId === selectedDeviceId) {
+                console.log('Updating currentDeviceData for device:', selectedDeviceId);
+                setCurrentDeviceData(data.data);
+            }
+        };
+
+        socketService.onDeviceStatus(handleDeviceStatus);
+        socketService.onSensorData(handleSensorData);
+
+        return () => {
+            socketService.off('device:status', handleDeviceStatus);
+            socketService.off('sensor:data', handleSensorData);
+        };
+    }, [user, selectedDeviceId]); // Added selectedDeviceId to dependencies
+
+    // Update current data when selection changes
     useEffect(() => {
         if (!selectedDeviceId) {
             setCurrentDeviceData(null);
             return;
         }
-
-        let unsubscribe = () => { };
-
-        try {
-            unsubscribe = subscribeToDeviceData(selectedDeviceId, (data) => {
-                setCurrentDeviceData(data);
-            });
-        } catch (error) {
-            console.error("Error subscribing to device data:", error);
-        }
-
-        return () => {
-            if (typeof unsubscribe === 'function') {
-                unsubscribe();
-            }
-        };
+        // In a real app, you might fetch the latest data snapshot here
+        // For now, we wait for the next socket update
     }, [selectedDeviceId]);
-
-    // Subscribe to alerts
-    useEffect(() => {
-        if (!user) return;
-
-        let unsubscribe = () => { };
-
-        try {
-            unsubscribe = subscribeToAlerts(user.uid, (alertList) => {
-                setAlerts(alertList);
-            });
-        } catch (error) {
-            console.error("Error subscribing to alerts:", error);
-        }
-
-        return () => {
-            if (typeof unsubscribe === 'function') {
-                unsubscribe();
-            }
-        };
-    }, [user]);
 
     const value = {
         devices,

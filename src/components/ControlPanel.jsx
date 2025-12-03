@@ -2,7 +2,7 @@ import { useState } from "react";
 import PropTypes from 'prop-types';
 import { useDevice } from "../context/DeviceContext";
 import { useAuth } from "../context/AuthContext";
-import { sendDeviceCommand, createLog } from "../utils/firestoreAPI";
+import { commandAPI } from "../services/api";
 import { Power, RotateCw, Leaf, Zap, RefreshCw, Settings, AlertCircle } from "lucide-react";
 
 // Define static color mappings to avoid dynamic class generation
@@ -93,17 +93,18 @@ const ControlPanel = () => {
     setSuccess("");
 
     try {
-      // 1. Send command to Firestore
-      await sendDeviceCommand(selectedDeviceId, command, params);
+      // Send command via backend API
+      const response = await commandAPI.send(selectedDeviceId, command, params);
 
-      // 2. Create Log
-      await createLog(user.uid, selectedDeviceId, label, `User triggered ${label}`, 'info');
-
-      setSuccess(`Command "${label}" sent successfully.`);
-      setTimeout(() => setSuccess(""), 3000);
+      if (response.data.success) {
+        setSuccess(`Command "${label}" sent successfully.`);
+        setTimeout(() => setSuccess(""), 3000);
+      } else {
+        throw new Error(response.data.message || 'Command failed');
+      }
     } catch (err) {
       console.error("Action failed:", err);
-      setError(`Failed to send command: ${err.message}`);
+      setError(`Failed to send command: ${err.response?.data?.error || err.message}`);
     } finally {
       setLoadingAction(null);
     }

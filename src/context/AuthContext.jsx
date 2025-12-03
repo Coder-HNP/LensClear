@@ -7,13 +7,17 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
-export const AuthProvider = ({ children }) => {
+export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
+                // DEVELOPMENT ONLY: Use UID as token for placeholder backend auth
+                // In production, use: const token = await currentUser.getIdToken();
+                localStorage.setItem('authToken', currentUser.uid);
+
                 // Sync user data to Firestore
                 const userRef = doc(db, "users", currentUser.uid);
                 const userSnap = await getDoc(userRef);
@@ -30,6 +34,8 @@ export const AuthProvider = ({ children }) => {
                         }
                     });
                 }
+            } else {
+                localStorage.removeItem('authToken');
             }
             setUser(currentUser);
             setLoading(false);
@@ -76,4 +82,4 @@ export const AuthProvider = ({ children }) => {
             {!loading && children}
         </AuthContext.Provider>
     );
-};
+}

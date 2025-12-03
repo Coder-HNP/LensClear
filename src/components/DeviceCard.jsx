@@ -1,4 +1,4 @@
-import { Thermometer, Droplets, Battery, Signal, Wifi, WifiOff, Activity } from "lucide-react";
+import { Thermometer, Gauge, Activity, Zap, Wifi, WifiOff } from "lucide-react";
 import { useDevice } from "../context/DeviceContext";
 
 const MetricItem = ({ icon: Icon, label, value, unit, colorClass, bgClass }) => (
@@ -9,7 +9,7 @@ const MetricItem = ({ icon: Icon, label, value, unit, colorClass, bgClass }) => 
         <div>
             <p className="text-xs text-gray-500 font-medium">{label}</p>
             <p className="text-lg font-bold text-gray-800">
-                {value !== undefined ? value : "--"}
+                {value !== undefined && value !== null ? value : "--"}
                 <span className="text-xs text-gray-400 ml-1 font-normal">{unit}</span>
             </p>
         </div>
@@ -33,7 +33,7 @@ const DeviceCard = () => {
         );
     }
 
-    const isOnline = currentDeviceData.status === 'online';
+    const isOnline = currentDeviceData.status === 'online' || currentDeviceData.status === 'active' || currentDeviceData.status === 'idle' || currentDeviceData.status === 'running';
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -53,9 +53,9 @@ const DeviceCard = () => {
                     </div>
                 </div>
                 <div className="text-right hidden sm:block">
-                    <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Last Sync</p>
+                    <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Last Update</p>
                     <p className="text-sm font-medium text-gray-700">
-                        {currentDeviceData.updatedAt?.toDate?.().toLocaleTimeString() || "Never"}
+                        {currentDeviceData.lastUpdate ? new Date(currentDeviceData.lastUpdate).toLocaleTimeString() : "Never"}
                     </p>
                 </div>
             </div>
@@ -70,44 +70,28 @@ const DeviceCard = () => {
                     bgClass="bg-orange-50"
                 />
                 <MetricItem
-                    icon={Droplets}
-                    label="Humidity"
-                    value={currentDeviceData.humidity}
-                    unit="%"
+                    icon={Gauge}
+                    label="Motor RPM"
+                    value={currentDeviceData.rpm}
+                    unit="RPM"
                     colorClass="text-blue-500"
                     bgClass="bg-blue-50"
                 />
                 <MetricItem
-                    icon={Battery}
-                    label="Battery"
-                    value={currentDeviceData.battery}
-                    unit="%"
-                    colorClass={currentDeviceData.battery < 20 ? "text-red-500" : "text-green-500"}
-                    bgClass={currentDeviceData.battery < 20 ? "bg-red-50" : "bg-green-50"}
-                />
-                <MetricItem
-                    icon={Signal}
-                    label="Signal"
-                    value={currentDeviceData.signal}
-                    unit="dBm"
+                    icon={Activity}
+                    label="Vibration"
+                    value={currentDeviceData.vibration}
+                    unit="g"
                     colorClass="text-purple-500"
                     bgClass="bg-purple-50"
                 />
                 <MetricItem
-                    icon={Activity}
-                    label="PM2.5"
-                    value={currentDeviceData.pm25}
-                    unit="µg/m³"
-                    colorClass="text-teal-500"
-                    bgClass="bg-teal-50"
-                />
-                <MetricItem
-                    icon={Activity}
-                    label="CO2"
-                    value={currentDeviceData.co2}
-                    unit="ppm"
-                    colorClass="text-indigo-500"
-                    bgClass="bg-indigo-50"
+                    icon={Zap}
+                    label="Power"
+                    value={currentDeviceData.power}
+                    unit="kW"
+                    colorClass="text-yellow-500"
+                    bgClass="bg-yellow-50"
                 />
             </div>
         </div>

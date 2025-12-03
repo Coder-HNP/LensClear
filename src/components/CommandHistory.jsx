@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useDevice } from "../context/DeviceContext";
-import { subscribeToDeviceCommands } from "../utils/firestoreAPI";
+import { logAPI } from "../services/api";
+import socketService from "../services/socket";
 import { Terminal, Clock, CheckCircle, XCircle, Loader2 } from "lucide-react";
 
 const CommandHistory = () => {
@@ -14,14 +15,31 @@ const CommandHistory = () => {
             return;
         }
 
-        setLoading(true);
-        const unsubscribe = subscribeToDeviceCommands(selectedDeviceId, (data) => {
-            setCommands(data);
-            setLoading(false);
+        const fetchCommands = async () => {
+            setLoading(true);
+            try {
+                const response = await logAPI.getAll({ deviceId: selectedDeviceId, limit: 10 });
+                if (response.data.success) {
+                    setCommands(response.data.logs);
+                }
+            } catch (error) {
+                console.error("Failed to fetch command history:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchCommands();
+
+        // Subscribe to new logs via socket
+        socketService.onNewLog((newLog) => {
+            if (newLog.deviceId === selectedDeviceId) {
+                setCommands(prev => [newLog, ...prev].slice(0, 10));
+            }
         });
 
         return () => {
-            if (unsubscribe) unsubscribe();
+            socketService.off('log:new');
         };
     }, [selectedDeviceId]);
 
@@ -42,21 +60,21 @@ const CommandHistory = () => {
                 ) : commands.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-4">No commands executed yet.</p>
                 ) : (
-                    commands.slice(0, 10).map((cmd) => (
-                        <div key={cmd.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-between">
+                    commands.map((cmd) => (
+                        <div key={cmd._id || cmd.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className={`p-1.5 rounded-md ${cmd.status === 'success' ? 'bg-green-100 text-green-600' : cmd.status === 'error' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                                    {cmd.status === 'success' ? <CheckCircle size={14} /> : cmd.status === 'error' ? <XCircle size={14} /> : <Clock size={14} />}
+                                <div className={`p-1.5 rounded-md ${cmd.status === 'success' ? 'bg-green-100 text-green-600' : cmd.status === 'failed' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                    {cmd.status === 'success' ? <CheckCircle size={14} /> : cmd.status === 'failed' ? <XCircle size={14} /> : <Clock size={14} />}
                                 </div>
                                 <div>
-                                    <p className="text-sm font-medium text-gray-700 font-mono">{cmd.command}</p>
+                                    <p className="text-sm font-medium text-gray-700 font-mono">{cmd.action}</p>
                                     <p className="text-[10px] text-gray-400">
-                                        {cmd.timestamp?.toLocaleTimeString() || "Pending..."}
+                                        {new Date(cmd.timestamp).toLocaleTimeString()}
                                     </p>
                                 </div>
                             </div>
                             <span className="text-xs font-mono text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
-                                {JSON.stringify(cmd.params || {}).substring(0, 20)}
+                                {cmd.status}
                             </span>
                         </div>
                     ))

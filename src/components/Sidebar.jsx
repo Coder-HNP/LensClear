@@ -1,10 +1,11 @@
-import { LayoutDashboard, Settings, FileText, Cpu } from "lucide-react";
+import { LayoutDashboard, Settings, FileText, Cpu, Zap } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const Sidebar = ({ isOpen, closeSidebar }) => {
     const links = [
         { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
         { icon: Cpu, label: "Devices", path: "/devices" },
+        { icon: Zap, label: "Triggers", path: "/triggers" },
         { icon: FileText, label: "Logs", path: "/logs" },
         { icon: Settings, label: "Settings", path: "/settings" },
     ];

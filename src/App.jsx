@@ -10,6 +10,7 @@ import ForgotPassword from "./pages/ForgotPassword.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Devices from "./pages/Devices.jsx";
 import DeviceDetails from "./pages/DeviceDetails.jsx";
+import Triggers from "./pages/Triggers.jsx";
 import Logs from "./pages/Logs.jsx";
 import Settings from "./pages/Settings.jsx";
 
@@ -38,6 +39,11 @@ function App() {
             <Route path="/devices/:id" element={
               <ProtectRoute>
                 <DeviceDetails />
+              </ProtectRoute>
+            } />
+            <Route path="/triggers" element={
+              <ProtectRoute>
+                <Triggers />
               </ProtectRoute>
             } />
             <Route path="/logs" element={

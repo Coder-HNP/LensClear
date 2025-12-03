@@ -4,7 +4,7 @@ import Sidebar from "../components/Sidebar";
 import DeviceLinker from "../components/DeviceLinker";
 import { useDevice } from "../context/DeviceContext";
 import { useAuth } from "../context/AuthContext";
-import { getUserDevices, unlinkDeviceFromUser, renameDevice } from "../utils/firestoreAPI";
+import { deviceAPI } from "../services/api";
 import { Wifi, Trash2, ExternalLink, Loader2, AlertCircle, Edit2, Check, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -20,24 +20,45 @@ const Devices = () => {
     const [editingId, setEditingId] = useState(null);
     const [newName, setNewName] = useState("");
 
+    const fetchDevices = async () => {
+        try {
+            const response = await deviceAPI.getAll();
+            if (response.data.success) {
+                // Map backend device format to frontend expected format
+                const devices = response.data.devices.map(d => ({
+                    id: d.deviceId,
+                    name: d.name,
+                    status: d.status,
+                    lastOnline: d.lastSeen ? { toDate: () => new Date(d.lastSeen) } : null,
+                    type: d.type
+                }));
+                setUserDevices(devices);
+            }
+        } catch (err) {
+            console.error("Failed to fetch devices:", err);
+            setError("Failed to load devices.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (!user) return;
+        fetchDevices();
 
-        const unsubscribe = getUserDevices(user.uid, (devices) => {
-            setUserDevices(devices);
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
+        // Poll every 5 seconds for updates
+        const interval = setInterval(fetchDevices, 5000);
+        return () => clearInterval(interval);
     }, [user]);
 
     const handleRemove = async (e, deviceId) => {
         e.stopPropagation();
-        if (window.confirm("Are you sure you want to unlink this device?")) {
+        if (window.confirm("Are you sure you want to delete this device?")) {
             try {
-                await unlinkDeviceFromUser(user.uid, deviceId);
+                await deviceAPI.delete(deviceId);
+                fetchDevices(); // Refresh list
             } catch (err) {
-                setError("Failed to unlink device: " + err.message);
+                setError("Failed to delete device: " + err.message);
             }
         }
     };
@@ -46,8 +67,9 @@ const Devices = () => {
         e.stopPropagation();
         if (!editingId || !newName.trim()) return;
         try {
-            await renameDevice(user.uid, editingId, newName);
+            await deviceAPI.update(editingId, { name: newName });
             setEditingId(null);
+            fetchDevices(); // Refresh list
         } catch (err) {
             setError("Failed to rename device.");
         }
@@ -148,7 +170,7 @@ const Devices = () => {
                                                 <button
                                                     onClick={(e) => handleRemove(e, device.id)}
                                                     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                    title="Unlink Device"
+                                                    title="Delete Device"
                                                 >
                                                     <Trash2 size={18} />
                                                 </button>
