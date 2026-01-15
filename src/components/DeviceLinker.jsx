@@ -84,8 +84,8 @@ const DeviceLinker = () => {
 
                     <button
                         type="submit"
-                        disabled={loading}
-                        className="w-full btn-primary flex items-center justify-center gap-2"
+                        disabled={loading || !deviceId.trim() || !deviceName.trim()}
+                        className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {loading ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
                         Register Device

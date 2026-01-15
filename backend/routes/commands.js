@@ -63,6 +63,19 @@ router.post('/send', async (req, res) => {
             console.warn('MQTT publish failed, relying on HTTP polling:', mqttError.message);
         }
 
+        // Increment cleaning cycles if applicable
+        if (['run_cycle', 'restart', 'calibrate'].includes(command)) {
+            const updatedDevice = await Device.findOneAndUpdate(
+                { _id: device._id },
+                { $inc: { cleaningCycles: 1 } },
+                { new: true }
+            );
+
+            // Import dynamically to avoid circular dependency if any
+            const { emitDeviceUpdate } = await import('../services/socketService.js');
+            emitDeviceUpdate(deviceId, { cleaningCycles: updatedDevice.cleaningCycles });
+        }
+
         res.json({
             success: true,
             message: 'Command queued successfully',

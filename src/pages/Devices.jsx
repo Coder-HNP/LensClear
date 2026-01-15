@@ -26,7 +26,8 @@ const Devices = () => {
             if (response.data.success) {
                 // Map backend device format to frontend expected format
                 const devices = response.data.devices.map(d => ({
-                    id: d.deviceId,
+                    id: d._id, // Use Mongo _id for administrative tasks
+                    deviceId: d.deviceId, // Keep deviceId for display/IoT
                     name: d.name,
                     status: d.status,
                     lastOnline: d.lastSeen ? { toDate: () => new Date(d.lastSeen) } : null,
@@ -113,8 +114,18 @@ const Devices = () => {
                             {/* Device List */}
                             <div className="lg:col-span-2 space-y-4">
                                 {loading ? (
-                                    <div className="flex justify-center py-12">
-                                        <Loader2 size={32} className="animate-spin text-primary" />
+                                    <div className="space-y-4">
+                                        {[1, 2, 3].map(i => (
+                                            <div key={i} className="bg-white p-4 rounded-xl border border-gray-100 animate-pulse">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 bg-gray-200 rounded-xl"></div>
+                                                    <div className="flex-1 space-y-2">
+                                                        <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+                                                        <div className="h-3 bg-gray-100 rounded w-1/2"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 ) : userDevices.length === 0 ? (
                                     <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-200">
@@ -125,7 +136,7 @@ const Devices = () => {
                                         <div
                                             key={device.id}
                                             onClick={() => handleCardClick(device.id)}
-                                            className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:shadow-md transition-shadow cursor-pointer group"
+                                            className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group"
                                         >
                                             <div className="flex items-center gap-4 w-full">
                                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${device.status === 'online' ? 'bg-green-50 text-leaf-green' : 'bg-gray-50 text-gray-400'}`}>
@@ -141,7 +152,7 @@ const Devices = () => {
                                                                 className="border border-gray-300 rounded px-2 py-1 text-sm w-full max-w-[200px]"
                                                                 autoFocus
                                                             />
-                                                            <button onClick={handleRename} className="p-1 text-green-600 hover:bg-green-50 rounded"><Check size={16} /></button>
+                                                            <button onClick={(e) => handleRename(e)} className="p-1 text-green-600 hover:bg-green-50 rounded"><Check size={16} /></button>
                                                             <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} className="p-1 text-red-600 hover:bg-red-50 rounded"><X size={16} /></button>
                                                         </div>
                                                     ) : (
@@ -152,7 +163,7 @@ const Devices = () => {
                                                             </button>
                                                         </div>
                                                     )}
-                                                    <p className="text-xs text-gray-400 font-mono">ID: {device.id}</p>
+                                                    <p className="text-xs text-gray-400 font-mono">ID: {device.deviceId}</p>
                                                     <div className="flex items-center gap-3 mt-1">
                                                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${device.status === 'online' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                                                             {device.status || 'Offline'}

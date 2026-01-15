@@ -1,15 +1,14 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useAuth } from "./AuthContext";
 import { deviceAPI } from "../services/api";
-import socketService from "../services/socket";
-
 const DeviceContext = createContext({
     devices: [],
     selectedDeviceId: null,
     setSelectedDeviceId: () => { },
     currentDeviceData: null,
     alerts: [],
-    loading: true
+    loading: true,
+    refreshDevices: () => { }
 });
 
 export const useDevice = () => {
@@ -37,75 +36,62 @@ export const DeviceProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     // Fetch devices on mount
-    useEffect(() => {
+    // Fetch devices function wrapped in useCallback for stability
+    const fetchDevices = useCallback(async () => {
         if (!user) {
             setDevices([]);
             setLoading(false);
             return;
         }
 
-        const fetchDevices = async () => {
-            try {
-                const response = await deviceAPI.getAll();
-                if (response.data.success) {
-                    const deviceList = response.data.devices.map(d => ({
-                        id: d.deviceId,
-                        name: d.name,
-                        status: d.status,
-                        lastOnline: d.lastSeen ? new Date(d.lastSeen) : null,
-                        type: d.type
-                    }));
-                    setDevices(deviceList);
+        try {
+            const response = await deviceAPI.getAll();
+            if (response.data.success) {
+                const deviceList = response.data.devices.map(d => ({
+                    id: d.deviceId,
+                    name: d.name,
+                    status: d.status,
+                    lastOnline: d.lastSeen ? new Date(d.lastSeen) : null,
+                    type: d.type,
+                    cleaningCycles: d.cleaningCycles || 0
+                }));
 
-                    // Auto-select first device if none selected
-                    if (deviceList.length > 0 && !selectedDeviceId) {
-                        setSelectedDeviceId(deviceList[0].id);
+                // Only update if data actually changed to avoid unnecessary re-renders
+                setDevices(prev => {
+                    if (JSON.stringify(prev) !== JSON.stringify(deviceList)) {
+                        return deviceList;
                     }
+                    return prev;
+                });
+
+                // Auto-select first device if none selected
+                if (deviceList.length > 0 && !selectedDeviceId) {
+                    setSelectedDeviceId(deviceList[0].id);
                 }
-            } catch (err) {
-                console.error("Failed to fetch devices:", err);
-            } finally {
-                setLoading(false);
             }
-        };
+        } catch (err) {
+            // Silently handle network errors
+            if (err.code !== 'ERR_NETWORK') {
+                console.error("Failed to fetch devices:", err);
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [user, selectedDeviceId]);
 
-        fetchDevices();
-
-        // Initialize Socket.io
-        socketService.initSocket(user.uid);
-    }, [user]);
-
-    // Setup socket listeners with proper dependencies
+    // Initial fetch and Polling
     useEffect(() => {
         if (!user) return;
 
-        // Listen for device status updates
-        const handleDeviceStatus = (update) => {
-            console.log('Device status update:', update);
-            setDevices(prev => prev.map(d =>
-                d.id === update.deviceId
-                    ? { ...d, status: update.status, lastOnline: new Date(update.lastSeen) }
-                    : d
-            ));
-        };
+        fetchDevices();
 
-        // Listen for sensor data
-        const handleSensorData = (data) => {
-            console.log('Received sensor data:', data);
-            if (data.deviceId === selectedDeviceId) {
-                console.log('Updating currentDeviceData for device:', selectedDeviceId);
-                setCurrentDeviceData(data.data);
-            }
-        };
+        // Poll every 5 seconds to keep device list in sync
+        const interval = setInterval(fetchDevices, 5000);
 
-        socketService.onDeviceStatus(handleDeviceStatus);
-        socketService.onSensorData(handleSensorData);
+        return () => clearInterval(interval);
+    }, [user, fetchDevices]);
 
-        return () => {
-            socketService.off('device:status', handleDeviceStatus);
-            socketService.off('sensor:data', handleSensorData);
-        };
-    }, [user, selectedDeviceId]); // Added selectedDeviceId to dependencies
+
 
     // Update current data when selection changes
     useEffect(() => {
@@ -113,9 +99,36 @@ export const DeviceProvider = ({ children }) => {
             setCurrentDeviceData(null);
             return;
         }
-        // In a real app, you might fetch the latest data snapshot here
-        // For now, we wait for the next socket update
-    }, [selectedDeviceId]);
+
+        // Find device in current list to show immediate info
+        const device = devices.find(d => d.id === selectedDeviceId);
+
+        // If we found the device in our list, update currentDeviceData immediately
+        // This prevents showing stale data from the previously selected device
+        if (device) {
+            setCurrentDeviceData(prev => {
+                // If the current data is already for this device, don't overwrite it
+                // This respects richer data that might have come from socket updates
+                if (prev?.deviceId === selectedDeviceId) {
+                    return prev;
+                }
+
+                // Otherwise, initialize with the basic info we have
+                return {
+                    deviceId: device.id,
+                    name: device.name,
+                    status: device.status,
+                    lastUpdate: device.lastOnline, // Mapping lastOnline to lastUpdate
+                    cleaningCycles: device.cleaningCycles,
+                    type: device.type,
+                    // Default values for fields not in the basic list
+                    battery: 0,
+                    signal: 0,
+                    firmware: 'Loading...'
+                };
+            });
+        }
+    }, [selectedDeviceId, devices]);
 
     const value = {
         devices,
@@ -123,7 +136,8 @@ export const DeviceProvider = ({ children }) => {
         setSelectedDeviceId,
         currentDeviceData,
         alerts,
-        loading
+        loading,
+        refreshDevices: fetchDevices
     };
 
     return (

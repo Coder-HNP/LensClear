@@ -15,9 +15,25 @@ export function initMQTT(port = 1883) {
     mqttBroker = aedes();
     mqttServer = createServer(mqttBroker.handle);
 
-    mqttServer.listen(port, () => {
-        console.log(`✅ MQTT Broker running on port ${port}`);
+    mqttServer.on('error', (err) => {
+        if (err && err.code === 'EADDRINUSE') {
+            console.warn(`⚠️  MQTT port ${port} already in use. Skipping MQTT broker startup.`);
+        } else {
+            console.error('MQTT server error:', err);
+        }
     });
+
+    try {
+        mqttServer.listen(port, () => {
+            console.log(`✅ MQTT Broker running on port ${port}`);
+        });
+    } catch (err) {
+        if (err && err.code === 'EADDRINUSE') {
+            console.warn(`⚠️  MQTT port ${port} already in use. Skipping MQTT broker startup.`);
+        } else {
+            console.error('Failed to start MQTT broker:', err);
+        }
+    }
 
     // Client connection event
     mqttBroker.on('client', async (client) => {

@@ -47,6 +47,17 @@ export async function executeTrigger(trigger) {
                 } catch (mqttError) {
                     console.warn('MQTT publish failed, relying on HTTP polling:', mqttError.message);
                 }
+
+                // Increment cleaning cycles for ALL triggers
+                const updatedDevice = await Device.findOneAndUpdate(
+                    { _id: device._id },
+                    { $inc: { cleaningCycles: 1 } },
+                    { new: true }
+                );
+
+                // Emit update
+                const { emitDeviceUpdate } = await import('../services/socketService.js');
+                emitDeviceUpdate(device.deviceId, { cleaningCycles: updatedDevice.cleaningCycles });
             } catch (error) {
                 console.error(`Error executing trigger for device ${device.deviceId}:`, error);
 

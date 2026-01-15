@@ -13,10 +13,7 @@ const Navbar = ({ toggleSidebar }) => {
                     <Menu size={24} />
                 </button>
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-md">
-                        <span className="text-white font-bold text-lg">L</span>
-                    </div>
-                    <span className="text-xl font-bold text-dark-gray tracking-tight">Lens<span className="text-bright-blue">Clear</span></span>
+                    <img src="/logo.png" alt="LensClear Logo" className="h-8 w-auto" />
                 </div>
             </div>
 

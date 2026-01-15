@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6.0
+    restart: always
+    ports:
+      - "27017:27017" # Exposed to host if needed
+    volumes:
+      - mongodb_data:/data/db
+
+  # Backend Server
+  backend:
+    image: lensclear-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "5000:5000" # API
+      - "1883:1883" # MQTT
+    environment:
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongodb:27017/lensclear
+      - MQTT_PORT=1883
+      - FRONTEND_URL=http://localhost:5173 
+      # Note: FRONTEND_URL helps with CORS. 
+      # Ideally in docker prod this might be just http://localhost if served via nginx on 80
+      # But mapped port 5173 is what user sees.
+      - JWT_SECRET=your_docker_jwt_secret
+    depends_on:
+      - mongodb
+    links:
+      - mongodb
+
+  # Frontend (Served via Nginx)
+  frontend:
+    image: lensclear-frontend
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: /api
+        VITE_SOCKET_URL: http://localhost:5173
+    restart: always
+    ports:
+      - "5173:80" # Host 5173 Maps to Container 80
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:

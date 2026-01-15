@@ -3,33 +3,94 @@
 @tailwind utilities;
 
 @layer base {
+    :root {
+        --primary: #003E8A;
+        --primary-light: #e6eff9;
+        --bright-blue: #0077D1;
+        --leaf-green: #6BCB6B;
+        --aqua-teal: #36D5C6;
+        --light-gray: #F2F6FA;
+        --dark-gray: #2A2A2A;
+        --bg-main: #f8fafc;
+        --card-bg: #ffffff;
+        --border-color: #f1f5f9;
+    }
+
     body {
-        @apply bg-light-gray text-dark-gray font-sans antialiased;
+        margin: 0;
+        font-family: 'Inter', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: var(--light-gray);
+        color: var(--dark-gray);
+        overflow-x: hidden;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        color: var(--dark-gray);
     }
 }
 
 @layer components {
-    .btn-primary {
-        @apply bg-primary text-white px-4 py-2 rounded-lg hover:bg-bright-blue transition-colors duration-200 font-medium shadow-sm hover:shadow-md active:scale-95;
+    .card {
+        background: var(--card-bg);
+        border-radius: 1rem;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        border: 1px solid var(--border-color);
+        transition: all 0.2s ease;
     }
 
-    .card {
-        @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6 transition-all duration-300 hover:shadow-md;
+    .card:hover {
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    }
+
+    .stat-card {
+        @apply card p-4 flex items-center gap-4;
+    }
+
+    .btn-primary {
+        @apply bg-primary text-white px-4 py-2 rounded-lg font-semibold hover:bg-bright-blue transition-colors flex items-center gap-2;
+    }
+
+    .btn-secondary {
+        @apply bg-white text-gray-700 border border-gray-200 px-4 py-2 rounded-lg font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2;
     }
 
     .input-field {
-        @apply w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-bright-blue/20 focus:border-bright-blue transition-all duration-200;
+        @apply w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200 bg-white text-gray-800;
     }
+}
+
+@keyframes pulse-soft {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.pulse-green {
+    animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
     width: 8px;
-    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #f1f1f1;
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {

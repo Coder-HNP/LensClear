@@ -40,10 +40,7 @@ const Login = () => {
                 <div className="absolute top-0 left-0 w-full h-full bg-grid-pattern opacity-5 pointer-events-none"></div>
                 <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-8">
-                        <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg">
-                            <span className="text-white font-bold text-xl">L</span>
-                        </div>
-                        <span className="text-2xl font-bold text-dark-gray">Lens<span className="text-bright-blue">Clear</span></span>
+                        <img src="/logo.png" alt="LensClear Logo" className="h-10 w-auto" />
                     </div>
 
                     <h1 className="text-4xl lg:text-5xl font-bold text-dark-gray mb-6 leading-tight">

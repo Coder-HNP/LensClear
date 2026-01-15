@@ -78,6 +78,15 @@ export function emitNewLog(log) {
     }
 }
 
+/**
+ * Emit generic device update (e.g. cleaning cycles, name change)
+ */
+export function emitDeviceUpdate(deviceId, updates) {
+    if (io) {
+        io.emit('device:update', { deviceId, updates, timestamp: new Date() });
+    }
+}
+
 export default {
     initSocketIO,
     getIO,
@@ -85,4 +94,5 @@ export default {
     emitSensorData,
     emitTriggerExecuted,
     emitNewLog,
+    emitDeviceUpdate,
 };

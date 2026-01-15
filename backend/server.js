@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { initMQTT, setSocketIO } from './services/mqttService.js';
 import { initSocketIO } from './services/socketService.js';
 import { initScheduler } from './services/schedulerService.js';
+import { initStatusMonitor } from './services/statusMonitor.js';
 import authMiddleware from './middleware/auth.js';
 
 // Import routes
@@ -110,21 +111,30 @@ async function startServer() {
         await mongoose.connect(MONGODB_URI);
         console.log('✅ MongoDB connected');
 
+        // Initialize scheduler
+        console.log('⏰ Initializing scheduler...');
+        initScheduler();
+        console.log('✅ Scheduler initialized');
+
+        // Initialize device status monitor
+        console.log('🔍 Initializing device status monitor...');
+        initStatusMonitor(5000); // Check every 5 seconds
+        console.log('✅ Status monitor initialized');
+
         // Initialize Socket.io
         console.log('🔌 Initializing Socket.io...');
         const io = initSocketIO(httpServer, FRONTEND_URL);
         console.log('✅ Socket.io initialized');
 
-        // Initialize MQTT broker
-        console.log('📡 Initializing MQTT broker...');
-        initMQTT(MQTT_PORT);
-        setSocketIO(io); // Link MQTT to Socket.io
-        console.log('✅ MQTT broker initialized');
-
-        // Initialize scheduler
-        console.log('⏰ Initializing scheduler...');
-        initScheduler();
-        console.log('✅ Scheduler initialized');
+        // Initialize MQTT broker (optional)
+        if (process.env.ENABLE_MQTT !== 'false') {
+            console.log('📡 Initializing MQTT broker...');
+            initMQTT(MQTT_PORT);
+            setSocketIO(io); // Link MQTT to Socket.io
+            console.log('✅ MQTT broker initialized');
+        } else {
+            console.log('📡 MQTT broker disabled by ENABLE_MQTT env');
+        }
 
         // Start HTTP server - LISTEN ON ALL INTERFACES (0.0.0.0)
         httpServer.listen(PORT, '0.0.0.0', () => {

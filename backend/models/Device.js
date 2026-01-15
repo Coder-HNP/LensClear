@@ -47,6 +47,10 @@ const deviceSchema = new mongoose.Schema({
             default: true,
         },
     },
+    cleaningCycles: {
+        type: Number,
+        default: 0,
+    },
     userId: {
         type: String,
         required: true,

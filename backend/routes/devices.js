@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Device from '../models/Device.js';
 import SensorData from '../models/SensorData.js';
 import crypto from 'crypto';
@@ -91,8 +92,11 @@ router.put('/:id', async (req, res) => {
         const { id } = req.params;
         const { name, type, location, configuration } = req.body;
 
-        // Find device and verify ownership
-        const device = await Device.findOne({ deviceId: id, userId });
+        // Find device and verify ownership (try _id first, then deviceId)
+        let device = await Device.findOne({ _id: mongoose.isValidObjectId(id) ? id : null, userId });
+        if (!device) {
+            device = await Device.findOne({ deviceId: id, userId });
+        }
 
         if (!device) {
             return res.status(404).json({ error: 'Device not found' });
@@ -130,8 +134,11 @@ router.delete('/:id', async (req, res) => {
         const userId = req.user?.uid || req.user?.id;
         const { id } = req.params;
 
-        // Find and delete device
-        const device = await Device.findOneAndDelete({ deviceId: id, userId });
+        // Find and delete device (try _id first, then deviceId)
+        let device = await Device.findOneAndDelete({ _id: mongoose.isValidObjectId(id) ? id : null, userId });
+        if (!device) {
+            device = await Device.findOneAndDelete({ deviceId: id, userId });
+        }
 
         if (!device) {
             return res.status(404).json({ error: 'Device not found' });

@@ -1,77 +1,95 @@
-import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState } from "react";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import DeviceCard from "../components/DeviceCard";
-import LiveChart from "../components/LiveChart";
-import AlertsPanel from "../components/AlertsPanel";
-import ControlPanel from "../components/ControlPanel";
 import Timeline from "../components/Timeline";
-import DeviceLinker from "../components/DeviceLinker";
-import CommandHistory from "../components/CommandHistory";
 import SystemHealth from "../components/SystemHealth";
+import ControlPanel from "../components/ControlPanel";
+import DeviceLinker from "../components/DeviceLinker";
 import { useDevice } from "../context/DeviceContext";
+import { Layers, Wifi, RefreshCw } from "lucide-react";
+
+const StatCard = ({ icon: Icon, label, value, colorClass }) => (
+    <div className="flex-1 bg-gray-50/50 p-4 rounded-xl flex items-center gap-4 border border-transparent hover:border-gray-100 transition-all">
+        <div className={`p-2 rounded-lg bg-white shadow-sm ${colorClass}`}>
+            <Icon size={20} />
+        </div>
+        <div>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{label}</p>
+            <p className="text-xl font-bold text-gray-800">{value}</p>
+        </div>
+    </div>
+);
 
 const Dashboard = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const { devices = [], setSelectedDeviceId } = useDevice();
-    const [searchParams] = useSearchParams();
+    const { devices = [], currentDeviceData } = useDevice();
 
-    // Handle URL query param for device selection
-    useEffect(() => {
-        const deviceIdFromUrl = searchParams.get("deviceId");
-        if (deviceIdFromUrl) {
-            setSelectedDeviceId(deviceIdFromUrl);
-        }
-    }, [searchParams, setSelectedDeviceId]);
+    const onlineCount = devices.filter(d =>
+        d.status?.toLowerCase().includes('online') ||
+        d.status?.toLowerCase().includes('active') ||
+        d.status?.toLowerCase().includes('idle')
+    ).length;
 
     return (
-        <div className="min-h-screen bg-light-gray flex flex-col">
+        <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
             <Navbar toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar isOpen={sidebarOpen} closeSidebar={() => setSidebarOpen(false)} />
 
-                <main className="flex-1 p-4 md:p-6 overflow-y-auto h-[calc(100vh-4rem)]">
+                <main className="flex-1 p-6 overflow-y-auto h-[calc(100vh-4rem)]">
                     <div className="max-w-7xl mx-auto space-y-6">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+                        <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h1 className="text-2xl font-bold text-dark-gray">Dashboard</h1>
-                                <p className="text-gray-500 text-sm">Overview of your connected devices</p>
+                                <h1 className="text-2xl md:text-3xl font-extrabold text-[#1E293B]">Dashboard</h1>
+                                <p className="text-gray-400 text-xs md:text-sm mt-1">Overview of your connected devices</p>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <span className="text-sm font-medium text-gray-500">
-                                    {devices?.length || 0} Device{(devices?.length || 0) !== 1 ? 's' : ''} Online
-                                </span>
+                            <div className="text-xs md:text-sm font-bold text-gray-400 tracking-tight">
+                                {onlineCount} Device{onlineCount !== 1 ? 's' : ''} Online
                             </div>
                         </div>
 
-                        {/* Top Row: Device Card & Alerts */}
+                        {/* Top Main Card Section */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2">
+                            <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-8">
                                 <DeviceCard />
+
+                                <div className="flex flex-col md:flex-row gap-3">
+                                    <StatCard
+                                        icon={Layers}
+                                        label="Total Devices"
+                                        value={devices.length}
+                                        colorClass="text-blue-500"
+                                    />
+                                    <StatCard
+                                        icon={Wifi}
+                                        label="Active Devices"
+                                        value={onlineCount}
+                                        colorClass="text-green-500"
+                                    />
+                                </div>
                             </div>
-                            <div className="lg:col-span-1 h-full">
-                                <AlertsPanel />
+
+                            {/* System Healthy Card */}
+                            <div className="lg:col-span-1">
+                                <SystemHealth />
                             </div>
                         </div>
 
-                        {/* Middle Row: Chart & Controls */}
+                        {/* Bottom Grid Section */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2 space-y-6">
-                                <LiveChart />
-                                <CommandHistory />
+                            {/* Recent Activity Column */}
+                            <div className="lg:col-span-2">
+                                <Timeline />
                             </div>
+
+                            {/* Controls and Registration Column */}
                             <div className="lg:col-span-1 space-y-6">
                                 <ControlPanel />
-                                <SystemHealth />
                                 <DeviceLinker />
                             </div>
-                        </div>
-
-                        {/* Bottom Row: Timeline */}
-                        <div className="grid grid-cols-1">
-                            <Timeline />
                         </div>
                     </div>
                 </main>
