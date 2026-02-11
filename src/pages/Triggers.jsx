@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
-import { triggerAPI, deviceAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import {
+    subscribeTriggers,
+    createTrigger,
+    updateTrigger as updateTriggerAPI,
+    deleteTrigger as deleteTriggerAPI,
+    toggleTrigger as toggleTriggerAPI,
+    executeTrigger,
+    getUserDevices
+} from '../utils/firestoreAPI';
 import { Plus, Play, Edit2, Trash2, Power, PowerOff, Clock, Zap } from 'lucide-react';
 import './Triggers.css';
 
@@ -20,7 +28,7 @@ const Triggers = () => {
     const [formData, setFormData] = useState({
         name: '',
         type: 'immediate',
-        action: 'start_motor',
+        action: 'run_cycle',
         targetDevices: [],
         schedule: {
             type: 'once',
@@ -35,36 +43,31 @@ const Triggers = () => {
     });
 
     useEffect(() => {
-        fetchTriggers();
-        fetchDevices();
-    }, []);
+        if (!user) return;
 
-    const fetchTriggers = async () => {
-        try {
-            const response = await triggerAPI.getAll();
-            setTriggers(response.data.triggers || []);
-        } catch (error) {
-            console.error('Error fetching triggers:', error);
-        } finally {
+        // Subscribe to triggers in real-time
+        const unsubTriggers = subscribeTriggers(user.uid, (triggerList) => {
+            setTriggers(triggerList);
             setLoading(false);
-        }
-    };
+        });
 
-    const fetchDevices = async () => {
-        try {
-            const response = await deviceAPI.getAll();
-            setDevices(response.data.devices || []);
-        } catch (error) {
-            console.error('Error fetching devices:', error);
-        }
-    };
+        // Subscribe to devices in real-time
+        const unsubDevices = getUserDevices(user.uid, (deviceList) => {
+            setDevices(deviceList);
+        });
+
+        return () => {
+            unsubTriggers();
+            unsubDevices();
+        };
+    }, [user]);
 
     const handleCreateTrigger = () => {
         setEditingTrigger(null);
         setFormData({
             name: '',
             type: 'immediate',
-            action: 'start_motor',
+            action: 'run_cycle',
             targetDevices: [],
             schedule: {
                 type: 'once',
@@ -106,13 +109,27 @@ const Triggers = () => {
 
         try {
             if (editingTrigger) {
-                await triggerAPI.update(editingTrigger._id, formData);
+                // ... update logic
+                const processedData = {
+                    ...formData,
+                    schedule: { ...formData.schedule, datetime: formData.schedule.datetime }
+                };
+                await updateTriggerAPI(user.uid, editingTrigger.id, processedData);
             } else {
-                await triggerAPI.create(formData);
+                const docRef = await createTrigger(user.uid, formData);
+
+                // If it's an immediate trigger, run it right now!
+                if (formData.type === 'immediate') {
+                    console.log("[Triggers] ⚡ Executing immediate trigger...");
+                    await executeTrigger({ ...formData, id: docRef.id });
+
+                    // Log the creation and immediate run
+                    await createLog(user.uid, formData.targetDevices[0], "trigger", "Trigger Created & Fired", `Name: ${formData.name}`);
+                }
             }
 
             setShowModal(false);
-            fetchTriggers();
+            // No need to refetch — Firestore listener will auto-update
         } catch (error) {
             console.error('Error saving trigger:', error);
             alert('Failed to save trigger');
@@ -125,17 +142,20 @@ const Triggers = () => {
         }
 
         try {
-            await triggerAPI.delete(triggerId);
-            fetchTriggers();
+            await deleteTriggerAPI(user.uid, triggerId);
         } catch (error) {
             console.error('Error deleting trigger:', error);
             alert('Failed to delete trigger');
         }
     };
 
-    const handleExecute = async (triggerId) => {
+    const handleExecute = async (trigger) => {
         try {
-            await triggerAPI.execute(triggerId);
+            await executeTrigger(trigger);
+            // Log manual execution
+            if (user && trigger.targetDevices?.length > 0) {
+                await createLog(user.uid, trigger.targetDevices[0], "trigger", "Manual Execution", `Trigger: ${trigger.name}`);
+            }
             alert('Trigger executed successfully!');
         } catch (error) {
             console.error('Error executing trigger:', error);
@@ -143,10 +163,9 @@ const Triggers = () => {
         }
     };
 
-    const handleToggle = async (triggerId) => {
+    const handleToggle = async (trigger) => {
         try {
-            await triggerAPI.toggle(triggerId);
-            fetchTriggers();
+            await toggleTriggerAPI(user.uid, trigger.id, trigger.enabled);
         } catch (error) {
             console.error('Error toggling trigger:', error);
         }
@@ -159,6 +178,14 @@ const Triggers = () => {
                 ? prev.targetDevices.filter(id => id !== deviceId)
                 : [...prev.targetDevices, deviceId],
         }));
+    };
+
+    const handleSelectAll = () => {
+        if (formData.targetDevices.length === devices.length) {
+            setFormData(prev => ({ ...prev, targetDevices: [] }));
+        } else {
+            setFormData(prev => ({ ...prev, targetDevices: devices.map(d => d.id) }));
+        }
     };
 
     return (
@@ -200,7 +227,7 @@ const Triggers = () => {
                         ) : (
                             <div className="triggers-grid">
                                 {triggers.map((trigger) => (
-                                    <div key={trigger._id} className="trigger-card">
+                                    <div key={trigger.id} className="trigger-card">
                                         <div className="trigger-header">
                                             <div className="trigger-title-row">
                                                 <h3 className="trigger-name">{trigger.name}</h3>
@@ -227,7 +254,7 @@ const Triggers = () => {
                                                 <div className="trigger-info-row">
                                                     <span className="trigger-label">Next Run:</span>
                                                     <span className="trigger-value">
-                                                        {new Date(trigger.nextRun).toLocaleString()}
+                                                        {trigger.nextRun?.toDate ? trigger.nextRun.toDate().toLocaleString() : new Date(trigger.nextRun).toLocaleString()}
                                                     </span>
                                                 </div>
                                             )}
@@ -236,7 +263,7 @@ const Triggers = () => {
                                                 <div className="trigger-info-row">
                                                     <span className="trigger-label">Last Run:</span>
                                                     <span className="trigger-value">
-                                                        {new Date(trigger.lastRun).toLocaleString()}
+                                                        {trigger.lastRun?.toDate ? trigger.lastRun.toDate().toLocaleString() : new Date(trigger.lastRun).toLocaleString()}
                                                     </span>
                                                 </div>
                                             )}
@@ -244,22 +271,20 @@ const Triggers = () => {
 
                                         <div className="trigger-actions">
                                             <button
-                                                onClick={() => handleToggle(trigger._id)}
+                                                onClick={() => handleToggle(trigger)}
                                                 className="trigger-action-btn toggle"
                                                 title={trigger.enabled ? 'Disable' : 'Enable'}
                                             >
                                                 {trigger.enabled ? <PowerOff size={16} /> : <Power size={16} />}
                                             </button>
 
-                                            {trigger.type === 'scheduled' && (
-                                                <button
-                                                    onClick={() => handleExecute(trigger._id)}
-                                                    className="trigger-action-btn execute"
-                                                    title="Execute Now"
-                                                >
-                                                    <Play size={16} />
-                                                </button>
-                                            )}
+                                            <button
+                                                onClick={() => handleExecute(trigger)}
+                                                className="trigger-action-btn execute"
+                                                title="Execute Now"
+                                            >
+                                                <Play size={16} />
+                                            </button>
 
                                             <button
                                                 onClick={() => handleEditTrigger(trigger)}
@@ -270,7 +295,7 @@ const Triggers = () => {
                                             </button>
 
                                             <button
-                                                onClick={() => handleDelete(trigger._id)}
+                                                onClick={() => handleDelete(trigger.id)}
                                                 className="trigger-action-btn delete"
                                                 title="Delete"
                                             >
@@ -294,6 +319,7 @@ const Triggers = () => {
                         </h2>
 
                         <form onSubmit={handleSubmit} className="trigger-form">
+
                             {/* Name */}
                             <div className="form-group">
                                 <label>Trigger Name *</label>
@@ -325,25 +351,67 @@ const Triggers = () => {
                                     value={formData.action}
                                     onChange={(e) => setFormData({ ...formData, action: e.target.value })}
                                 >
-                                    <option value="start_motor">Start Motor</option>
+                                    <option value="run_cycle">Run Cleaning Cycle (Standard)</option>
                                     <option value="stop_motor">Stop Motor</option>
-                                    <option value="adjust_speed">Adjust Speed</option>
-                                    <option value="run_cycle">Run Cleaning Cycle</option>
                                 </select>
                             </div>
 
+                            {/* Parameters based on Action */}
+                            {formData.action === 'run_cycle' && (
+                                <div className="flex gap-4">
+                                    <div className="form-group flex-1">
+                                        <label>Speed (0-255)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="255"
+                                            value={formData.parameters?.speed || 128}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                parameters: { ...formData.parameters, speed: parseInt(e.target.value) }
+                                            })}
+                                        />
+                                    </div>
+                                    <div className="form-group flex-1">
+                                        <label>Duration (ms)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={formData.parameters?.duration || 5000}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                parameters: { ...formData.parameters, duration: parseInt(e.target.value) }
+                                            })}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Target Devices */}
                             <div className="form-group">
-                                <label>Target Devices * (Select at least one)</label>
-                                <div className="device-checkboxes">
-                                    {devices.map((device) => (
-                                        <label key={device.deviceId} className="checkbox-label">
+                                <div className="flex justify-between items-center mb-2">
+                                    <label>Target Devices *</label>
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectAll}
+                                        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                    >
+                                        {formData.targetDevices.length === devices.length ? 'Deselect All' : 'Select All'}
+                                    </button>
+                                </div>
+                                <div className="device-checkboxes max-h-40 overflow-y-auto border rounded p-2">
+                                    {devices.length === 0 ? (
+                                        <p className="text-gray-500 text-sm">No devices available.</p>
+                                    ) : devices.map((device) => (
+                                        <label key={device.id} className="checkbox-label flex items-center gap-2 mb-1">
                                             <input
                                                 type="checkbox"
-                                                checked={formData.targetDevices.includes(device.deviceId)}
-                                                onChange={() => handleDeviceToggle(device.deviceId)}
+                                                checked={formData.targetDevices.includes(device.id)}
+                                                onChange={() => handleDeviceToggle(device.id)}
                                             />
-                                            <span>{device.name}</span>
+                                            <span className={device.status === 'online' ? 'text-green-600' : 'text-gray-500'}>
+                                                {device.name}
+                                            </span>
                                         </label>
                                     ))}
                                 </div>
@@ -353,6 +421,21 @@ const Triggers = () => {
                             {formData.type === 'scheduled' && (
                                 <>
                                     <div className="form-group">
+                                        <label>Timezone</label>
+                                        <select
+                                            value={formData.schedule.timezone}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                schedule: { ...formData.schedule, timezone: e.target.value }
+                                            })}
+                                        >
+                                            <option value="UTC">UTC (Universal Time)</option>
+                                            <option value="Asia/Kolkata">🇮🇳 India (IST)</option>
+                                            <option value="Asia/Dubai">🇦🇪 Dubai (GST)</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="form-group">
                                         <label>Schedule Type</label>
                                         <select
                                             value={formData.schedule.type}
@@ -361,41 +444,104 @@ const Triggers = () => {
                                                 schedule: { ...formData.schedule, type: e.target.value }
                                             })}
                                         >
-                                            <option value="once">Once</option>
+                                            <option value="once">One-time</option>
                                             <option value="daily">Daily</option>
                                             <option value="weekly">Weekly</option>
                                         </select>
                                     </div>
 
-                                    <div className="form-group">
-                                        <label>Date & Time</label>
-                                        <input
-                                            type="datetime-local"
-                                            value={formData.schedule.datetime}
-                                            onChange={(e) => setFormData({
-                                                ...formData,
-                                                schedule: { ...formData.schedule, datetime: e.target.value }
-                                            })}
-                                        />
-                                    </div>
-                                </>
-                            )}
+                                    {formData.schedule.type === 'once' && (
+                                        <div className="form-group">
+                                            <label>Date & Time (One-time)</label>
+                                            <input
+                                                type="datetime-local"
+                                                value={formData.schedule.datetime || ''}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    schedule: { ...formData.schedule, datetime: e.target.value }
+                                                })}
+                                                className="w-full p-2 border rounded"
+                                            />
+                                            <p className="text-[10px] text-gray-400 mt-1 italic">
+                                                Tip: Use the calendar icon to select
+                                            </p>
+                                        </div>
+                                    )}
 
-                            {/* Parameters */}
-                            {(formData.action === 'adjust_speed' || formData.action === 'start_motor') && (
-                                <div className="form-group">
-                                    <label>Motor Speed (0-255)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max="255"
-                                        value={formData.parameters.speed}
-                                        onChange={(e) => setFormData({
-                                            ...formData,
-                                            parameters: { ...formData.parameters, speed: parseInt(e.target.value) }
-                                        })}
-                                    />
-                                </div>
+                                    {formData.schedule.type === 'daily' && (
+                                        <div className="form-group">
+                                            <label>Time of Day (Runs every day)</label>
+                                            <input
+                                                type="time"
+                                                value={formData.schedule.datetime || ''}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    schedule: { ...formData.schedule, datetime: e.target.value }
+                                                })}
+                                                className="w-full p-2 border rounded"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {formData.schedule.type === 'weekly' && (
+                                        <div className="form-group space-y-2">
+                                            <label>Day & Time</label>
+                                            <div className="flex gap-2">
+                                                <select
+                                                    className="flex-1"
+                                                    value={formData.schedule.datetime ? new Date(formData.schedule.datetime).getDay() : ""}
+                                                    onChange={(e) => {
+                                                        const targetDay = parseInt(e.target.value);
+                                                        const date = new Date();
+                                                        const currentDay = date.getDay();
+                                                        let diff = targetDay - currentDay;
+                                                        if (diff < 0) diff += 7;
+                                                        date.setDate(date.getDate() + diff);
+
+                                                        // Preserve time if already set
+                                                        if (formData.schedule.datetime && !isNaN(new Date(formData.schedule.datetime).getTime())) {
+                                                            const old = new Date(formData.schedule.datetime);
+                                                            date.setHours(old.getHours(), old.getMinutes(), 0, 0);
+                                                        } else {
+                                                            date.setHours(12, 0, 0, 0);
+                                                        }
+
+                                                        setFormData({
+                                                            ...formData,
+                                                            schedule: { ...formData.schedule, datetime: date.toISOString() }
+                                                        });
+                                                    }}
+                                                >
+                                                    <option value="">Select Day</option>
+                                                    <option value="1">Monday</option>
+                                                    <option value="2">Tuesday</option>
+                                                    <option value="3">Wednesday</option>
+                                                    <option value="4">Thursday</option>
+                                                    <option value="5">Friday</option>
+                                                    <option value="6">Saturday</option>
+                                                    <option value="0">Sunday</option>
+                                                </select>
+                                                <input
+                                                    type="time"
+                                                    className="flex-1"
+                                                    value={formData.schedule.datetime ?
+                                                        (new Date(formData.schedule.datetime).getHours().toString().padStart(2, '0') + ':' +
+                                                            new Date(formData.schedule.datetime).getMinutes().toString().padStart(2, '0'))
+                                                        : ''}
+                                                    onChange={(e) => {
+                                                        const [h, m] = e.target.value.split(':').map(Number);
+                                                        const date = formData.schedule.datetime ? new Date(formData.schedule.datetime) : new Date();
+                                                        date.setHours(h, m, 0, 0);
+                                                        setFormData({
+                                                            ...formData,
+                                                            schedule: { ...formData.schedule, datetime: date.toISOString() }
+                                                        });
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
 
                             {/* Form Actions */}

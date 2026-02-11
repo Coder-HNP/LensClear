@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { updateDeviceControl } from "../utils/firestoreAPI";
-import { Play, Square, RotateCw, Send } from "lucide-react";
+import { sendDeviceCommand } from "../utils/firestoreAPI";
+import { Play, Square, RotateCw } from "lucide-react";
 
-const DeviceControls = () => {
-    const [deviceId] = useState("device_001");
+const DeviceControls = ({ deviceId }) => {
     const [loading, setLoading] = useState(false);
 
     const handleCommand = async (command) => {
         setLoading(true);
         try {
-            await updateDeviceControl(deviceId, command);
+            await sendDeviceCommand(deviceId, command);
         } catch (error) {
             console.error("Error sending command:", error);
         }
@@ -40,13 +39,6 @@ const DeviceControls = () => {
                     className="flex items-center justify-center gap-2 p-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors disabled:opacity-50 cursor-pointer"
                 >
                     <RotateCw size={18} /> Restart
-                </button>
-                <button
-                    onClick={() => handleCommand("PING")}
-                    disabled={loading}
-                    className="flex items-center justify-center gap-2 p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                    <Send size={18} /> Ping
                 </button>
             </div>
         </div>

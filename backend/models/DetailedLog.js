@@ -13,6 +13,10 @@ const detailedLogSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    parameters: {
+        type: Object,
+        default: {},
+    },
     triggeredBy: {
         type: String, // Firebase UID or user identifier
         required: true,

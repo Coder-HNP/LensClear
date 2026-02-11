@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useDevice } from "../context/DeviceContext";
 import { useAuth } from "../context/AuthContext";
-import { commandAPI } from "../services/api";
+import { sendDeviceCommand, createLog } from "../utils/firestoreAPI";
 import { RotateCw, RefreshCw, Settings, AlertCircle } from "lucide-react";
 
 const ControlButton = ({ icon: Icon, label, onClick, variant = 'default', loading }) => {
@@ -36,10 +36,8 @@ const ControlPanel = () => {
     setError("");
 
     try {
-      const response = await commandAPI.send(selectedDeviceId, command, params);
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'Command failed');
-      }
+      await sendDeviceCommand(selectedDeviceId, command, params);
+      await createLog(user.uid, selectedDeviceId, "command", `Sent ${label} command`, `Command: ${command.toUpperCase()}`);
     } catch (err) {
       console.error("Action failed:", err);
       setError(`Failed to send command: ${err.message}`);

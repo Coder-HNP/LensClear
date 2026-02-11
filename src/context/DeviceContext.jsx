@@ -1,6 +1,15 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 import { useAuth } from "./AuthContext";
-import { deviceAPI } from "../services/api";
+import {
+    getUserDevices,
+    subscribeToDeviceData,
+    updateDeviceData,
+    createLog,
+    subscribeTriggers,
+    subscribeToAlerts
+} from "../utils/firestoreAPI";
+import { io } from "socket.io-client";
+
 const DeviceContext = createContext({
     devices: [],
     selectedDeviceId: null,
@@ -10,6 +19,8 @@ const DeviceContext = createContext({
     loading: true,
     refreshDevices: () => { }
 });
+
+const BACKEND_URL = 'http://localhost:5000';
 
 export const useDevice = () => {
     const context = useContext(DeviceContext);
@@ -34,101 +45,134 @@ export const DeviceProvider = ({ children }) => {
     const [currentDeviceData, setCurrentDeviceData] = useState(null);
     const [alerts, setAlerts] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [unlinkedDevices, setUnlinkedDevices] = useState(new Set());
+    const [socket, setSocket] = useState(null);
 
-    // Fetch devices on mount
-    // Fetch devices function wrapped in useCallback for stability
-    const fetchDevices = useCallback(async () => {
-        if (!user) {
+    // 1. INITIALIZE SOCKET
+    useEffect(() => {
+        const newSocket = io(BACKEND_URL);
+        setSocket(newSocket);
+
+        newSocket.on("connect", () => {
+            console.log("Connected to Backend Proxy Bridge");
+        });
+
+        return () => newSocket.disconnect();
+    }, []);
+
+    // 2. FETCH DEVICES & TRIGGERS (Authenticated)
+    useEffect(() => {
+        if (!user || !socket) {
             setDevices([]);
             setLoading(false);
             return;
         }
 
-        try {
-            const response = await deviceAPI.getAll();
-            if (response.data.success) {
-                const deviceList = response.data.devices.map(d => ({
-                    id: d.deviceId,
-                    name: d.name,
-                    status: d.status,
-                    lastOnline: d.lastSeen ? new Date(d.lastSeen) : null,
-                    type: d.type,
-                    cleaningCycles: d.cleaningCycles || 0
-                }));
+        setLoading(true);
 
-                // Only update if data actually changed to avoid unnecessary re-renders
-                setDevices(prev => {
-                    if (JSON.stringify(prev) !== JSON.stringify(deviceList)) {
-                        return deviceList;
-                    }
-                    return prev;
-                });
-
-                // Auto-select first device if none selected
-                if (deviceList.length > 0 && !selectedDeviceId) {
-                    setSelectedDeviceId(deviceList[0].id);
-                }
+        // Subscribe to Devices
+        const unsubDevices = getUserDevices(user.uid, (deviceList) => {
+            setDevices(deviceList);
+            if (deviceList.length > 0 && !selectedDeviceId) {
+                setSelectedDeviceId(deviceList[0].id);
             }
-        } catch (err) {
-            // Silently handle network errors
-            if (err.code !== 'ERR_NETWORK') {
-                console.error("Failed to fetch devices:", err);
-            }
-        } finally {
             setLoading(false);
-        }
-    }, [user, selectedDeviceId]);
+        });
 
-    // Initial fetch and Polling
+        // Subscribe to Triggers and SYNC to Backend Memory
+        const unsubTriggers = subscribeTriggers(user.uid, (triggerList) => {
+            // Push triggers to backend so scheduler can run them without DB permissions
+            console.log(`[Proxy] Syncing ${triggerList.length} triggers to backend memory`);
+            socket.emit("proxy:sync_triggers", { userId: user.uid, triggers: triggerList });
+        });
+
+        return () => {
+            unsubDevices();
+            unsubTriggers();
+        };
+    }, [user, socket]);
+
+    // 2.5 SUBSCRIBE TO ALERTS
     useEffect(() => {
         if (!user) return;
+        const unsubAlerts = subscribeToAlerts((alertList) => {
+            setAlerts(alertList);
+        });
+        return () => unsubAlerts();
+    }, [user]);
 
-        fetchDevices();
-
-        // Poll every 5 seconds to keep device list in sync
-        const interval = setInterval(fetchDevices, 5000);
-
-        return () => clearInterval(interval);
-    }, [user, fetchDevices]);
-
-
-
-    // Update current data when selection changes
+    // 3. LISTEN FOR PROXY REQUESTS FROM BACKEND
     useEffect(() => {
-        if (!selectedDeviceId) {
-            setCurrentDeviceData(null);
-            return;
-        }
+        if (!socket || !user) return;
 
-        // Find device in current list to show immediate info
-        const device = devices.find(d => d.id === selectedDeviceId);
+        // --- STATUS & LOG PROXY (Bypasses Backend Permission Denied) ---
+        socket.on("device:sync", async ({ deviceId, payload }) => {
+            if (!user) return;
 
-        // If we found the device in our list, update currentDeviceData immediately
-        // This prevents showing stale data from the previously selected device
-        if (device) {
-            setCurrentDeviceData(prev => {
-                // If the current data is already for this device, don't overwrite it
-                // This respects richer data that might have come from socket updates
-                if (prev?.deviceId === selectedDeviceId) {
-                    return prev;
-                }
+            // 1. Feed Heartbeat to Backend Memory Monitor
+            socket.emit("proxy:track_heartbeat", { deviceId, userId: user.uid });
 
-                // Otherwise, initialize with the basic info we have
-                return {
-                    deviceId: device.id,
-                    name: device.name,
-                    status: device.status,
-                    lastUpdate: device.lastOnline, // Mapping lastOnline to lastUpdate
-                    cleaningCycles: device.cleaningCycles,
-                    type: device.type,
-                    // Default values for fields not in the basic list
-                    battery: 0,
-                    signal: 0,
-                    firmware: 'Loading...'
-                };
-            });
-        }
-    }, [selectedDeviceId, devices]);
+            const hasDevice = devices.some(d => String(d.id) === String(deviceId));
+            if (hasDevice) {
+                // Frontend is AUTHENTICATED -> Performs the save for the backend
+                await updateDeviceData(user.uid, deviceId, {
+                    ...payload,
+                    lastOnline: new Date()
+                }).catch(() => { });
+            }
+
+            if (String(deviceId) === String(selectedDeviceId)) {
+                setCurrentDeviceData(prev => ({ ...prev, ...payload }));
+            }
+        });
+
+        socket.on("proxy:update_trigger_state", async ({ triggerId, userId: targetUserId, updates }) => {
+            // Only process if this is the target user
+            if (user && user.uid === targetUserId) {
+                const { updateTrigger } = await import("../utils/firestoreAPI");
+                await updateTrigger(user.uid, triggerId, updates).catch(() => { });
+            }
+        });
+
+        socket.on("proxy:create_log", async (logData) => {
+            // Only log if the user owns this device (Coerce IDs to strings for matching)
+            const hasDevice = devices.some(d => String(d.id) === String(logData.deviceId));
+            if (hasDevice && user) {
+                await createLog(user.uid, String(logData.deviceId), logData.type, logData.action, logData.details);
+            }
+        });
+
+        socket.on("device:status", async (data) => {
+            const { deviceId, status } = data;
+            const targetId = String(deviceId);
+
+            // Update UI
+            if (targetId === String(selectedDeviceId)) {
+                setCurrentDeviceData(prev => ({ ...prev, status }));
+            }
+
+            // Persist "Offline" status to user folder via bridge
+            if (status === 'offline' && user) {
+                const { updateDeviceData } = await import("../utils/firestoreAPI");
+                await updateDeviceData(user.uid, targetId, { status: 'offline' });
+            }
+        });
+
+        // Real-time UI updates (Vitals)
+        socket.on("sensor:data", (data) => {
+            if (String(data.deviceId) === String(selectedDeviceId)) {
+                setCurrentDeviceData(prev => ({ ...prev, ...data, lastUpdate: new Date() }));
+            }
+        });
+
+        return () => {
+            socket.off("device:sync");
+            socket.off("proxy:update_trigger_state");
+            socket.off("proxy:create_log");
+            socket.off("device:unlinked");
+            socket.off("sensor:data");
+        };
+    }, [socket, user, devices, selectedDeviceId]);
 
     const value = {
         devices,
@@ -136,8 +180,9 @@ export const DeviceProvider = ({ children }) => {
         setSelectedDeviceId,
         currentDeviceData,
         alerts,
+        unlinkedDevices,
         loading,
-        refreshDevices: fetchDevices
+        refreshDevices: () => { }
     };
 
     return (

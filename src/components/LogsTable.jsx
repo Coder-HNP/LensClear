@@ -3,19 +3,25 @@ import { useAuth } from "../context/AuthContext";
 import { subscribeToLogs } from "../utils/firestoreAPI";
 import { Info, AlertTriangle, XCircle, CheckCircle } from "lucide-react";
 
-const LogsTable = ({ limit = 10 }) => {
+const LogsTable = ({ limit = 10, deviceId = null }) => {
     const { user } = useAuth();
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (!user) return;
-        const unsubscribe = subscribeToLogs(user.uid, (data) => {
-            setLogs(data);
+        if (!user) {
             setLoading(false);
-        });
-        return unsubscribe;
-    }, [user]);
+            return;
+        }
+
+        // Subscribe to real-time logs via Firestore
+        const unsubscribe = subscribeToLogs(user.uid, (logList) => {
+            setLogs(logList.slice(0, limit));
+            setLoading(false);
+        }, deviceId);
+
+        return () => unsubscribe();
+    }, [user, deviceId, limit]);
 
     const getIcon = (type) => {
         switch (type) {
@@ -23,6 +29,23 @@ const LogsTable = ({ limit = 10 }) => {
             case 'warning': return <AlertTriangle size={16} className="text-orange-500" />;
             case 'success': return <CheckCircle size={16} className="text-green-500" />;
             default: return <Info size={16} className="text-blue-500" />;
+        }
+    };
+
+    const formatTimestamp = (ts) => {
+        if (!ts) return 'Just now';
+        try {
+            const date = ts.toDate ? ts.toDate() : new Date(ts);
+            if (isNaN(date.getTime())) return 'Invalid Date';
+            return date.toLocaleString([], {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } catch (e) {
+            return 'Just now';
         }
     };
 
@@ -48,7 +71,7 @@ const LogsTable = ({ limit = 10 }) => {
                         {logs.slice(0, limit).map((log) => (
                             <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
-                                    {log.timestamp?.toLocaleTimeString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    {formatTimestamp(log.timestamp)}
                                 </td>
                                 <td className="px-6 py-4">
                                     <div className="flex items-center gap-2">
@@ -56,10 +79,10 @@ const LogsTable = ({ limit = 10 }) => {
                                         <span className="capitalize text-gray-700">{log.type || 'info'}</span>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4 font-medium text-gray-800">{log.action}</td>
+                                <td className="px-6 py-4 font-medium text-gray-800">{log.action || log.event}</td>
                                 <td className="px-6 py-4 text-gray-500 font-mono text-xs">{log.deviceId}</td>
                                 <td className="px-6 py-4 text-gray-600 max-w-xs truncate" title={log.details}>
-                                    {log.details}
+                                    {log.details || ''}
                                 </td>
                             </tr>
                         ))}

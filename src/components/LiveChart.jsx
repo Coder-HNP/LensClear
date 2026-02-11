@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Line } from "react-chartjs-2";
 import { useDevice } from "../context/DeviceContext";
+import { useAuth } from "../context/AuthContext";
 import { subscribeToSensorHistory } from "../utils/firestoreAPI";
 import { getChartOptions, formatSensorDataForChart } from "../utils/chartUtils";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const LiveChart = () => {
+    const { user } = useAuth();
     const { selectedDeviceId } = useDevice();
     const [chartData, setChartData] = useState({ labels: [], datasets: [] });
     const [loading, setLoading] = useState(false);
@@ -20,7 +22,7 @@ const LiveChart = () => {
         setLoading(true);
         setError("");
 
-        const unsubscribe = subscribeToSensorHistory(selectedDeviceId, (data) => {
+        const unsubscribe = subscribeToSensorHistory(user.uid, selectedDeviceId, (data) => {
             try {
                 const formattedData = formatSensorDataForChart(data);
                 setChartData(formattedData);

@@ -1,28 +1,40 @@
 import { Server } from 'socket.io';
+import { syncMemoryQueue } from './schedulerService.js';
+import { trackDeviceHeartbeat } from './statusMonitor.js';
 
 let io = null;
 
 /**
  * Initialize Socket.io server
  */
-export function initSocketIO(httpServer, corsOrigin) {
+export function initSocketIO(httpServer) {
     io = new Server(httpServer, {
         cors: {
-            origin: corsOrigin,
-            methods: ['GET', 'POST'],
-            credentials: true,
-        },
+            origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+            methods: ["GET", "POST"],
+            credentials: true
+        }
     });
 
     io.on('connection', (socket) => {
-        console.log(`🔌 Socket.io client connected: ${socket.id}`);
+        console.log(`🔌 Proxy Bridge: Connected ${socket.id}`);
 
-        // Handle client disconnect
-        socket.on('disconnect', () => {
-            console.log(`🔌 Socket.io client disconnected: ${socket.id}`);
+        // Handle Trigger Sync from Frontend (Proxy Mode)
+        socket.on('proxy:sync_triggers', ({ userId, triggers }) => {
+            console.log(`[Socket] 📥 Trigger sync received from UI for user: ${userId}`);
+            syncMemoryQueue(userId, triggers);
         });
 
-        // Optional: Handle room joining for user-specific updates
+        // Heartbeat Tracking (Memory Monitor)
+        socket.on("proxy:track_heartbeat", ({ deviceId, userId }) => {
+            trackDeviceHeartbeat(deviceId, userId);
+        });
+
+        socket.on('disconnect', () => {
+            console.log(`🔌 Proxy Bridge: Disconnected ${socket.id}`);
+        });
+
+        // Handle client room joining for targeted updates
         socket.on('join:user', (userId) => {
             socket.join(`user:${userId}`);
             console.log(`User ${userId} joined their room`);
@@ -43,48 +55,31 @@ export function getIO() {
 }
 
 /**
- * Emit device status update
+ * Emit device status update (Real-time Vitual update)
  */
 export function emitDeviceStatus(deviceId, status) {
-    if (io) {
-        io.emit('device:status', { deviceId, status, timestamp: new Date() });
-    }
+    if (io) io.emit('device:status', { deviceId, status, timestamp: new Date() });
 }
 
 /**
- * Emit sensor data update
+ * Emit sensor data (Real-time Vitals)
  */
 export function emitSensorData(deviceId, data) {
-    if (io) {
-        io.emit('sensor:data', { deviceId, data, timestamp: new Date() });
-    }
+    if (io) io.emit('sensor:data', { deviceId, data, timestamp: new Date() });
 }
 
 /**
- * Emit trigger execution
+ * Emit trigger execution results
  */
 export function emitTriggerExecuted(triggerId, status) {
-    if (io) {
-        io.emit('trigger:executed', { triggerId, status, timestamp: new Date() });
-    }
+    if (io) io.emit('trigger:executed', { triggerId, status, timestamp: new Date() });
 }
 
 /**
- * Emit new log entry
+ * Broadcast an unlinked device alert
  */
-export function emitNewLog(log) {
-    if (io) {
-        io.emit('log:new', log);
-    }
-}
-
-/**
- * Emit generic device update (e.g. cleaning cycles, name change)
- */
-export function emitDeviceUpdate(deviceId, updates) {
-    if (io) {
-        io.emit('device:update', { deviceId, updates, timestamp: new Date() });
-    }
+export function emitUnlinkedDevice(deviceId) {
+    if (io) io.emit('device:unlinked', { deviceId });
 }
 
 export default {
@@ -93,6 +88,5 @@ export default {
     emitDeviceStatus,
     emitSensorData,
     emitTriggerExecuted,
-    emitNewLog,
-    emitDeviceUpdate,
+    emitUnlinkedDevice
 };

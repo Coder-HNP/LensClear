@@ -25,12 +25,26 @@ const Login = () => {
     };
 
     const handleGoogleSignIn = async () => {
+        setError("");
+        setLoading(true);
         try {
             await googleSignIn();
             navigate("/dashboard");
         } catch (err) {
-            setError("Google Sign-in failed.");
+            console.error("Google Sign-in error:", err);
+            if (err.code === "auth/popup-closed-by-user") {
+                setError("Sign-in popup was closed. Please try again.");
+            } else if (err.code === "auth/popup-blocked") {
+                setError("Popup was blocked by your browser. Please allow popups for this site.");
+            } else if (err.code === "auth/unauthorized-domain") {
+                setError("This domain is not authorized for Google Sign-In. Add it in Firebase Console → Authentication → Settings → Authorized domains.");
+            } else if (err.code === "auth/cancelled-popup-request") {
+                // User clicked multiple times, ignore
+            } else {
+                setError(`Google Sign-in failed: ${err.message || err.code || "Unknown error"}`);
+            }
         }
+        setLoading(false);
     };
 
     return (

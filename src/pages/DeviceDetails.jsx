@@ -6,12 +6,15 @@ import LiveChart from "../components/LiveChart";
 import ControlPanel from "../components/ControlPanel";
 import LogsTable from "../components/LogsTable";
 import { useDevice } from "../context/DeviceContext";
-import { ArrowLeft, Wifi, Battery, Signal, Activity, Cpu } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
+import { updateDeviceToken } from "../utils/firestoreAPI";
+import { ArrowLeft, Wifi, Battery, Signal, Activity, Cpu, Copy } from "lucide-react";
 
 const DeviceDetails = () => {
     const { id } = useParams();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const { devices, setSelectedDeviceId, currentDeviceData } = useDevice();
+    const { user } = useAuth();
 
     useEffect(() => {
         if (id) {
@@ -50,7 +53,9 @@ const DeviceDetails = () => {
                                 </div>
                                 <div>
                                     <p className="text-xs text-gray-500">Status</p>
-                                    <p className="font-bold text-gray-800 capitalize">{device.status || 'Unknown'}</p>
+                                    <p className="font-bold text-gray-800 capitalize">
+                                        {(device.status && device.status.toLowerCase() !== 'unknown') ? device.status : 'Offline'}
+                                    </p>
                                 </div>
                             </div>
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3">
@@ -85,7 +90,7 @@ const DeviceDetails = () => {
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2 space-y-6">
                                 <LiveChart />
-                                <LogsTable limit={5} />
+                                <LogsTable limit={5} deviceId={id} />
                             </div>
                             <div className="lg:col-span-1">
                                 <ControlPanel />
@@ -106,14 +111,50 @@ const DeviceDetails = () => {
                                         <div className="flex justify-between py-2 border-b border-gray-50">
                                             <span className="text-gray-500">Last Sync</span>
                                             <span className="font-medium text-gray-800">
-                                                {device.updatedAt?.toDate?.().toLocaleString() || 'Never'}
+                                                {device.updatedAt?.toDate ? device.updatedAt.toDate().toLocaleString() : (device.updatedAt ? new Date(device.updatedAt).toLocaleString() : 'Never')}
                                             </span>
                                         </div>
                                         <div className="flex justify-between py-2 border-b border-gray-50">
                                             <span className="text-gray-500">Created</span>
                                             <span className="font-medium text-gray-800">
-                                                {device.createdAt?.toDate?.().toLocaleDateString() || 'Unknown'}
+                                                {device.createdAt?.toDate ? device.createdAt.toDate().toLocaleDateString() : (device.createdAt ? new Date(device.createdAt).toLocaleDateString() : 'N/A')}
                                             </span>
+                                        </div>
+                                        <div className="flex justify-between py-2 border-b border-gray-50 items-center">
+                                            <span className="text-gray-500">Auth Token</span>
+                                            {device.authToken ? (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-medium text-gray-800 font-mono text-xs select-all bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                                                        {device.authToken}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(device.authToken);
+                                                            alert("Token copied!");
+                                                        }}
+                                                        className="text-gray-400 hover:text-primary"
+                                                        title="Copy Token"
+                                                    >
+                                                        <Copy size={14} />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={async () => {
+                                                        if (window.confirm("Generate a new Auth Token for this device? You will need to update the device firmware.")) {
+                                                            try {
+                                                                const newToken = crypto.randomUUID();
+                                                                await updateDeviceToken(user?.uid, device.id, newToken);
+                                                            } catch (err) {
+                                                                alert("Failed to generate token");
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="text-xs text-primary hover:underline font-medium"
+                                                >
+                                                    Generate Token
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

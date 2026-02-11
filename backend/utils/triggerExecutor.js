@@ -1,103 +1,67 @@
-import { publishCommand } from '../services/mqttService.js';
-import DetailedLog from '../models/DetailedLog.js';
-import Device from '../models/Device.js';
-import { emitTriggerExecuted, emitNewLog } from '../services/socketService.js';
+import axios from 'axios';
+import { emitTriggerExecuted } from '../services/socketService.js';
+
+const BACKEND_URL = `http://localhost:${process.env.PORT || 5000}`;
 
 /**
- * Execute a trigger (send commands to target devices)
+ * Execute a trigger (send commands to target devices via Local Relay)
  */
 export async function executeTrigger(trigger) {
-    const startTime = Date.now();
-    const logs = [];
+    console.log(`🚀 Executing Trigger: ${trigger.name} (${trigger.action})`);
 
     try {
-        // Get target devices
-        const devices = await Device.find({
-            deviceId: { $in: trigger.targetDevices },
-        });
-
-        if (devices.length === 0) {
-            throw new Error('No valid target devices found');
+        if (!trigger.targetDevices || trigger.targetDevices.length === 0) {
+            throw new Error('No target devices specified in trigger');
         }
 
-        // Execute command for each device
-        for (const device of devices) {
+        // 1. Relay command to the hardware via our local API
+        for (const deviceId of trigger.targetDevices) {
             try {
-                // Create log entry with pending status
-                const log = new DetailedLog({
-                    deviceId: device.deviceId,
-                    deviceName: device.name,
-                    action: trigger.action,
-                    triggeredBy: trigger.userId,
-                    status: 'pending', // ESP32 will poll and pick this up
-                    timestamp: new Date(),
+                console.log(`[Executor] Relay command to Device ${deviceId}: ${trigger.action}`);
+
+                await axios.post(`${BACKEND_URL}/api/commands/send`, {
+                    deviceId,
+                    command: getCommandFromAction(trigger.action),
+                    params: trigger.parameters || {}
                 });
 
-                await log.save();
-                logs.push(log);
+                // 2. Request Frontend to record this in Logs (Proxy Mode)
+                const { getIO } = await import('../services/socketService.js');
+                const io = getIO();
+                io.emit("proxy:create_log", {
+                    deviceId: String(deviceId),
+                    type: 'trigger',
+                    action: 'Trigger Execution Success',
+                    details: `Scheduled Trigger: ${trigger.name}`
+                });
 
-                // Emit new log to frontend
-                emitNewLog(log);
+                console.log(`✅ Trigger relayed for ${deviceId}`);
 
-                console.log(`✅ Trigger command queued for ${device.name}: ${trigger.action}`);
-
-                // Also try MQTT as fallback (fire and forget)
-                try {
-                    publishCommand(device.deviceId, trigger.action, trigger.parameters);
-                } catch (mqttError) {
-                    console.warn('MQTT publish failed, relying on HTTP polling:', mqttError.message);
-                }
-
-                // Increment cleaning cycles for ALL triggers
-                const updatedDevice = await Device.findOneAndUpdate(
-                    { _id: device._id },
-                    { $inc: { cleaningCycles: 1 } },
-                    { new: true }
-                );
-
-                // Emit update
-                const { emitDeviceUpdate } = await import('../services/socketService.js');
-                emitDeviceUpdate(device.deviceId, { cleaningCycles: updatedDevice.cleaningCycles });
             } catch (error) {
-                console.error(`Error executing trigger for device ${device.deviceId}:`, error);
-
-                // Update log with error
-                const log = logs.find(l => l.deviceId === device.deviceId);
-                if (log) {
-                    log.status = 'failed';
-                    log.errorMessage = error.message;
-                    log.responseTime = Date.now() - startTime;
-                    await log.save();
-                }
+                console.error(`❌ Executor error for ${deviceId}:`, error.message);
             }
         }
 
-        // Emit trigger executed event
-        emitTriggerExecuted(trigger._id, 'success');
+        // 3. Inform UI
+        emitTriggerExecuted(trigger.id, 'success');
 
-        return {
-            success: true,
-            logsCreated: logs.length,
-        };
+        return { success: true };
     } catch (error) {
-        console.error('Error executing trigger:', error);
-
-        // Emit trigger failed event
-        emitTriggerExecuted(trigger._id, 'failed');
-
+        console.error('❌ Trigger Executor Failed:', error);
+        emitTriggerExecuted(trigger.id, 'failed');
         throw error;
     }
 }
 
 /**
- * Map action to MQTT command format
+ * Map action to command format
  */
 export function getCommandFromAction(action) {
     const commandMap = {
+        'run_cycle': 'CYCLE',
         'start_motor': 'START',
         'stop_motor': 'STOP',
-        'adjust_speed': 'SPEED',
-        'run_cycle': 'CYCLE',
+        'adjust_speed': 'SPEED'
     };
 
     return commandMap[action] || action.toUpperCase();

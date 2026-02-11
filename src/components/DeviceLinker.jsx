@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { deviceAPI } from "../services/api";
+import { linkDeviceToUser } from "../utils/firestoreAPI";
 import { Plus, Loader2, Copy, Check } from "lucide-react";
 
 const DeviceLinker = () => {
@@ -15,7 +15,7 @@ const DeviceLinker = () => {
 
     const handleAddDevice = async (e) => {
         e.preventDefault();
-        if (!deviceId || !deviceName) return;
+        if (!deviceId || !deviceName || !user) return;
 
         setLoading(true);
         setError("");
@@ -23,23 +23,19 @@ const DeviceLinker = () => {
         setGeneratedToken("");
 
         try {
-            // Call backend API to create device and get token
-            const response = await deviceAPI.create({
-                deviceId,
-                name: deviceName,
-                type: 'combined', // Fixed: Must match enum ['motor', 'sensor', 'combined']
-                location: 'Home'
-            });
+            // Generate a client-side auth token
+            const authToken = crypto.randomUUID();
 
-            if (response.data.success) {
-                setSuccess("Device registered successfully!");
-                setGeneratedToken(response.data.device.authToken);
-                setDeviceId("");
-                setDeviceName("");
-            }
+            // Link device to user in Firestore
+            await linkDeviceToUser(user.uid, deviceId, deviceName, authToken);
+
+            setSuccess("Device registered successfully!");
+            setGeneratedToken(authToken);
+            setDeviceId("");
+            setDeviceName("");
         } catch (err) {
             console.error(err);
-            setError(err.response?.data?.error || "Failed to register device.");
+            setError(err.message || "Failed to register device.");
         }
         setLoading(false);
     };

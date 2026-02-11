@@ -1,22 +1,11 @@
 /*
  * LensClear ESP32 IoT Firmware
  * 
- * This firmware connects ESP32 to WiFi and MQTT broker,
- * controls motors for lens cleaning, reads sensors,
- * and communicates with the LensClear backend.
- * 
- * Hardware Requirements:
- * - ESP32 DevKit board
- * - DC Motor with L298N motor driver
- * - DHT22 temperature sensor (or DS18B20)
- * - LED indicators
- * - Optional: Hall effect sensor for RPM, current sensor
- * 
- * Libraries Required:
- * - WiFi (built-in)
- * - PubSubClient (MQTT)
- * - DHT sensor library
- * - ArduinoJson
+ * Features:
+ * - Non-blocking WiFi & MQTT connection re-tries
+ * - Robust Command Handling (JSON)
+ * - Fixed Speed Motor Control
+ * - Heartbeat/Sensor Reporting
  */
 
 #include <WiFi.h>
@@ -32,16 +21,16 @@ const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 // MQTT Broker Configuration
 const char* MQTT_SERVER = "192.168.1.100";  // Your backend server IP
 const int MQTT_PORT = 1883;
-const char* DEVICE_ID = "ESP32_001";  // Unique device ID (use MAC address)
-const char* AUTH_TOKEN = "your_device_auth_token_here";  // Get from backend
+const char* DEVICE_ID = "ESP32_001";  // Unique device ID
+const char* AUTH_TOKEN = "your_device_auth_token_here"; 
 
 // Pin Definitions
-#define MOTOR_PIN1 25      // Motor driver IN1
-#define MOTOR_PIN2 26      // Motor driver IN2
-#define MOTOR_PWM_PIN 27   // Motor speed control (PWM)
-#define DHT_PIN 4          // DHT22 data pin
-#define LED_STATUS 2       // Built-in LED (status indicator)
-#define LED_ERROR 15       // Error LED (red)
+#define MOTOR_PIN1 25
+#define MOTOR_PIN2 26
+#define MOTOR_PWM_PIN 27 // Still used for Enable/Speed but fixed at max
+#define DHT_PIN 4
+#define LED_STATUS 2
+#define LED_ERROR 15
 
 // Sensor Configuration
 #define DHT_TYPE DHT22
@@ -50,380 +39,289 @@ DHT dht(DHT_PIN, DHT_TYPE);
 // Motor Configuration
 #define PWM_CHANNEL 0
 #define PWM_FREQUENCY 5000
-#define PWM_RESOLUTION 8  // 8-bit (0-255)
+#define PWM_RESOLUTION 8
+const int MOTOR_SPEED_FULL = 255;
 
 // Timing Configuration
-#define SENSOR_INTERVAL 5000  // Send sensor data every 5 seconds
-#define RECONNECT_DELAY 5000  // Retry connection every 5 seconds
+const long SENSOR_INTERVAL = 5000;
+const long WIFI_RETRY_INTERVAL = 5000;
+const long MQTT_RETRY_INTERVAL = 5000;
 
 // ==================== GLOBAL VARIABLES ====================
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 unsigned long lastSensorUpdate = 0;
-int currentMotorSpeed = 0;
+unsigned long lastWiFiRetry = 0;
+unsigned long lastMqttRetry = 0;
 bool motorRunning = false;
 
 // MQTT Topics
 String topicCommandMotor;
-String topicCommandConfig;
 String topicSensorData;
 String topicStatus;
 String topicResponse;
 
 // ==================== FUNCTION DECLARATIONS ====================
-void setupWiFi();
-void setupMQTT();
-void reconnectWiFi();
-void reconnectMQTT();
+void connectWiFi();
+void connectMQTT();
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void publishSensorData();
 void publishStatus(const char* status);
 void executeCommand(JsonDocument& doc);
-void startMotor(int speed = 128);
+void startMotor();
 void stopMotor();
-void adjustSpeed(int speed);
-void runCleaningCycle();
+void runCleaningCycle(int durationMs);
 float readTemperature();
-int readRPM();
 void blinkLED(int pin, int times);
 
 // ==================== SETUP ====================
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  
-  Serial.println("\n\n=================================");
-  Serial.println("LensClear ESP32 IoT Device");
-  Serial.println("=================================");
+  delay(1000); // Allow serial to stabilize
+
+  Serial.println("\n\n=== LensClear ESP32 Firmware Starting ===");
   Serial.println("Device ID: " + String(DEVICE_ID));
-  
-  // Initialize pins
+
+  // Initialize Pins
   pinMode(MOTOR_PIN1, OUTPUT);
   pinMode(MOTOR_PIN2, OUTPUT);
   pinMode(LED_STATUS, OUTPUT);
   pinMode(LED_ERROR, OUTPUT);
-  
-  // Setup PWM for motor speed control
+
+  // Setup PWM
   ledcSetup(PWM_CHANNEL, PWM_FREQUENCY, PWM_RESOLUTION);
   ledcAttachPin(MOTOR_PWM_PIN, PWM_CHANNEL);
-  
-  // Initialize sensors
+
+  // Initialize Sensors
   dht.begin();
   
-  // Stop motor initially
+  // Initial State
   stopMotor();
-  
-  // Setup MQTT topics
+
+  // Define Topics
   topicCommandMotor = "devices/" + String(DEVICE_ID) + "/commands/motor";
-  topicCommandConfig = "devices/" + String(DEVICE_ID) + "/commands/config";
   topicSensorData = "devices/" + String(DEVICE_ID) + "/sensors/data";
   topicStatus = "devices/" + String(DEVICE_ID) + "/status";
   topicResponse = "devices/" + String(DEVICE_ID) + "/response";
-  
-  // Connect to WiFi
-  setupWiFi();
-  
-  // Connect to MQTT
-  setupMQTT();
-  
-  Serial.println("=================================");
-  Serial.println("Setup complete! Device ready.");
-  Serial.println("=================================\n");
-  
-  blinkLED(LED_STATUS, 3);
+
+  // MQTT Client Setup
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+
+  // Initial Connection Attempt (Blocking just for startup is okay, but we use non-blocking loop later)
+  connectWiFi();
 }
 
 // ==================== MAIN LOOP ====================
 void loop() {
-  // Check WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    reconnectWiFi();
-  }
-  
-  // Check MQTT connection
-  if (!mqttClient.connected()) {
-    reconnectMQTT();
-  }
-  
-  // Process MQTT messages
-  mqttClient.loop();
-  
-  // Publish sensor data periodically
   unsigned long currentMillis = millis();
-  if (currentMillis - lastSensorUpdate >= SENSOR_INTERVAL) {
-    lastSensorUpdate = currentMillis;
-    publishSensorData();
+
+  // 1. Maintain WiFi Connection
+  if (WiFi.status() != WL_CONNECTED) {
+    if (currentMillis - lastWiFiRetry >= WIFI_RETRY_INTERVAL) {
+      lastWiFiRetry = currentMillis;
+      connectWiFi();
+    }
+  } 
+  // 2. Maintain MQTT Connection (only if WiFi is up)
+  else {
+    if (!mqttClient.connected()) {
+      if (currentMillis - lastMqttRetry >= MQTT_RETRY_INTERVAL) {
+        lastMqttRetry = currentMillis;
+        connectMQTT();
+      }
+    } else {
+      // Client connected, process incoming
+      mqttClient.loop();
+      
+      // 3. Publish Data Periodically
+      if (currentMillis - lastSensorUpdate >= SENSOR_INTERVAL) {
+        lastSensorUpdate = currentMillis;
+        publishSensorData();
+      }
+    }
   }
-  
-  // Blink status LED to show device is alive
-  digitalWrite(LED_STATUS, (millis() / 1000) % 2);
+
+  // Alive blink
+  if (currentMillis % 2000 < 100) {
+      digitalWrite(LED_STATUS, HIGH);
+  } else {
+      digitalWrite(LED_STATUS, LOW);
+  }
 }
 
-// ==================== WIFI FUNCTIONS ====================
-void setupWiFi() {
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(WIFI_SSID);
-  
+// ==================== WIFI & MQTT ====================
+void connectWiFi() {
+  Serial.println("[WiFi] Connecting to " + String(WIFI_SSID) + "...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // We don't block here with 'while', check status in next loop iteration
+  // But for initial connect, a small check is fine.
+  // Actually, WiFi.begin returns immediately. The loop checks status.
+}
+
+void connectMQTT() {
+  Serial.print("[MQTT] Connecting to broker...");
   
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✓ WiFi connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(LED_STATUS, HIGH);
+  // Connect with ID, User, Pass (User/Pass same for simplicity or as config)
+  if (mqttClient.connect(DEVICE_ID, DEVICE_ID, AUTH_TOKEN)) {
+    Serial.println(" Connected!");
+    digitalWrite(LED_ERROR, LOW);
+    
+    // Subscribe
+    mqttClient.subscribe(topicCommandMotor.c_str());
+    Serial.println("Subscribed to: " + topicCommandMotor);
+    
+    // Announce Online
+    publishStatus("online");
   } else {
-    Serial.println("\n✗ WiFi connection failed!");
+    Serial.print(" Failed (rc=");
+    Serial.print(mqttClient.state());
+    Serial.println(")");
     digitalWrite(LED_ERROR, HIGH);
   }
 }
 
-void reconnectWiFi() {
-  Serial.println("WiFi disconnected. Reconnecting...");
-  digitalWrite(LED_ERROR, HIGH);
-  WiFi.disconnect();
-  delay(1000);
-  setupWiFi();
-}
-
-// ==================== MQTT FUNCTIONS ====================
-void setupMQTT() {
-  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-  mqttClient.setCallback(mqttCallback);
-  reconnectMQTT();
-}
-
-void reconnectMQTT() {
-  while (!mqttClient.connected()) {
-    Serial.print("Connecting to MQTT broker...");
-    
-    // Attempt connection with authentication
-    if (mqttClient.connect(DEVICE_ID, DEVICE_ID, AUTH_TOKEN)) {
-      Serial.println(" ✓ Connected!");
-      
-      // Subscribe to command topics
-      mqttClient.subscribe(topicCommandMotor.c_str());
-      mqttClient.subscribe(topicCommandConfig.c_str());
-      
-      Serial.println("Subscribed to:");
-      Serial.println("  - " + topicCommandMotor);
-      Serial.println("  - " + topicCommandConfig);
-      
-      // Publish online status
-      publishStatus("online");
-      
-      digitalWrite(LED_ERROR, LOW);
-    } else {
-      Serial.print(" ✗ Failed, rc=");
-      Serial.println(mqttClient.state());
-      Serial.println("Retrying in 5 seconds...");
-      
-      digitalWrite(LED_ERROR, HIGH);
-      delay(RECONNECT_DELAY);
-    }
-  }
-}
-
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message received on topic: ");
-  Serial.println(topic);
+  Serial.print("Message on [");
+  Serial.print(topic);
+  Serial.print("]: ");
   
-  // Parse JSON payload
-  StaticJsonDocument<256> doc;
+  // Limit payload size to prevent overflow
+  if (length > 256) length = 256;
+  
+  StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, payload, length);
-  
+
   if (error) {
-    Serial.print("JSON parsing failed: ");
+    Serial.print("deserializeJson() failed: ");
     Serial.println(error.c_str());
     return;
   }
   
-  // Execute command
+  // Use serializeJson to pretty print to serial for debug
+  serializeJson(doc, Serial);
+  Serial.println();
+
   executeCommand(doc);
 }
 
 // ==================== COMMAND EXECUTION ====================
 void executeCommand(JsonDocument& doc) {
   const char* command = doc["command"];
-  unsigned long startTime = millis();
   bool success = true;
   String errorMsg = "";
-  
-  Serial.print("Executing command: ");
+  unsigned long startTime = millis();
+
+  Serial.print("CMD: ");
   Serial.println(command);
-  
-  if (strcmp(command, "start_motor") == 0) {
-    int speed = doc["parameters"]["speed"] | 128;
-    startMotor(speed);
+
+  if (strcmp(command, "START") == 0 || strcmp(command, "start_motor") == 0) {
+    startMotor(); // Fixed speed
   }
-  else if (strcmp(command, "stop_motor") == 0) {
+  else if (strcmp(command, "STOP") == 0 || strcmp(command, "stop_motor") == 0) {
     stopMotor();
   }
-  else if (strcmp(command, "adjust_speed") == 0) {
-    int speed = doc["parameters"]["speed"] | 128;
-    adjustSpeed(speed);
+  else if (strcmp(command, "CYCLE") == 0 || strcmp(command, "run_cycle") == 0) {
+    // Run cycle: e.g. run for 5 seconds then stop
+    // Note: Since this is blocking 'delay', it might block MQTT keepalives. 
+    // In production, use state machine. For now, short delays are Acceptable.
+    // Or better: set a flag 'cycleActive' and handle in loop.
+    // For simplicity of this refactor, we'll do a simple blocking sequence 
+    // BUT we must call mqttClient.loop() if it's long.
+    
+    Serial.println("Starting cleaning cycle...");
+    startMotor();
+    unsigned long cycleStart = millis();
+    while (millis() - cycleStart < 5000) {
+        // Keep MQTT alive
+        if (millis() % 100 == 0) mqttClient.loop(); 
+        delay(10); 
+    }
+    stopMotor();
+    Serial.println("Cycle complete.");
   }
-  else if (strcmp(command, "run_cycle") == 0) {
-    runCleaningCycle();
+  else if (strcmp(command, "PING") == 0) {
+    String msg = "PING";
+    if (doc["parameters"].containsKey("message")) {
+        msg = doc["parameters"]["message"].as<String>();
+    }
+    Serial.print("🔔 PING RECEIVED: ");
+    Serial.println(msg);
   }
   else {
     success = false;
     errorMsg = "Unknown command";
-    Serial.println("✗ Unknown command!");
+    Serial.println("Unknown command received");
   }
-  
-  // Send acknowledgment
-  StaticJsonDocument<128> response;
-  response["success"] = success;
-  response["responseTime"] = millis() - startTime;
-  if (!success) {
-    response["error"] = errorMsg;
-  }
-  
-  char buffer[128];
-  serializeJson(response, buffer);
+
+  // Send ACK
+  StaticJsonDocument<256> resp;
+  resp["success"] = success;
+  resp["command"] = command;
+  resp["responseTime"] = millis() - startTime;
+  if (!success) resp["error"] = errorMsg;
+
+  char buffer[256];
+  serializeJson(resp, buffer);
   mqttClient.publish(topicResponse.c_str(), buffer);
-  
-  if (success) {
-    Serial.println("✓ Command executed successfully");
-  }
 }
 
-// ==================== MOTOR CONTROL ====================
-void startMotor(int speed) {
-  speed = constrain(speed, 0, 255);
-  
+// ==================== MOTOR LOGIC ====================
+void startMotor() {
   digitalWrite(MOTOR_PIN1, HIGH);
   digitalWrite(MOTOR_PIN2, LOW);
-  ledcWrite(PWM_CHANNEL, speed);
-  
-  currentMotorSpeed = speed;
+  ledcWrite(PWM_CHANNEL, MOTOR_SPEED_FULL); // Always full speed
   motorRunning = true;
-  
-  Serial.print("Motor started at speed: ");
-  Serial.println(speed);
+  publishStatus("running");
+  Serial.println("Motor STARTED (Full Speed)");
 }
 
 void stopMotor() {
   digitalWrite(MOTOR_PIN1, LOW);
   digitalWrite(MOTOR_PIN2, LOW);
   ledcWrite(PWM_CHANNEL, 0);
-  
-  currentMotorSpeed = 0;
   motorRunning = false;
-  
-  Serial.println("Motor stopped");
+  publishStatus("idle");
+  Serial.println("Motor STOPPED");
 }
 
-void adjustSpeed(int speed) {
-  if (!motorRunning) {
-    startMotor(speed);
-    return;
-  }
-  
-  speed = constrain(speed, 0, 255);
-  ledcWrite(PWM_CHANNEL, speed);
-  currentMotorSpeed = speed;
-  
-  Serial.print("Motor speed adjusted to: ");
-  Serial.println(speed);
-}
-
-void runCleaningCycle() {
-  Serial.println("Starting cleaning cycle...");
-  
-  // Example cleaning cycle: ramp up, run, ramp down
-  for (int speed = 0; speed <= 255; speed += 5) {
-    adjustSpeed(speed);
-    delay(50);
-  }
-  
-  delay(3000);  // Run at full speed for 3 seconds
-  
-  for (int speed = 255; speed >= 0; speed -= 5) {
-    adjustSpeed(speed);
-    delay(50);
-  }
-  
-  stopMotor();
-  Serial.println("Cleaning cycle complete");
-}
-
-// ==================== SENSOR FUNCTIONS ====================
-float readTemperature() {
-  float temp = dht.readTemperature();
-  
-  if (isnan(temp)) {
-    Serial.println("Failed to read temperature!");
-    return 0.0;
-  }
-  
-  return temp;
-}
-
-int readRPM() {
-  // Placeholder for RPM sensor
-  // Implement based on your sensor type (hall effect, encoder, etc.)
-  // For now, return simulated value
-  if (motorRunning) {
-    return map(currentMotorSpeed, 0, 255, 0, 3000);
-  }
-  return 0;
-}
-
+// ==================== SENSORS ====================
 void publishSensorData() {
-  float temperature = readTemperature();
-  int rpm = readRPM();
+  float temp = dht.readTemperature();
+  if (isnan(temp)) temp = 0.0;
   
-  // Create JSON payload
+  // Simulated RPM for feedback
+  int rpm = motorRunning ? 3000 : 0;
+
   StaticJsonDocument<256> doc;
-  doc["temperature"] = temperature;
+  doc["temperature"] = temp;
   doc["rpm"] = rpm;
-  doc["powerConsumption"] = 0.0;  // Implement if you have current sensor
-  doc["vibration"] = 0.0;  // Implement if you have accelerometer
-  doc["errorCode"] = "";
-  doc["timestamp"] = millis();
+  doc["timestamp"] = millis(); // Backend will overwrite with server time
   
   char buffer[256];
   serializeJson(doc, buffer);
+  mqttClient.publish(topicSensorData.c_str(), buffer);
   
-  // Publish to MQTT
-  if (mqttClient.publish(topicSensorData.c_str(), buffer)) {
-    Serial.print("Sensor data published: ");
-    Serial.println(buffer);
-  } else {
-    Serial.println("Failed to publish sensor data");
-  }
+  Serial.print("Sent Telemetry: ");
+  Serial.println(buffer);
 }
 
 void publishStatus(const char* status) {
   StaticJsonDocument<128> doc;
   doc["status"] = status;
-  doc["timestamp"] = millis();
   
   char buffer[128];
   serializeJson(doc, buffer);
-  
-  mqttClient.publish(topicStatus.c_str(), buffer, true);  // Retained message
-  
-  Serial.print("Status published: ");
-  Serial.println(status);
+  mqttClient.publish(topicStatus.c_str(), buffer, true); // Retained
 }
 
-// ==================== UTILITY FUNCTIONS ====================
 void blinkLED(int pin, int times) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(pin, HIGH);
-    delay(200);
-    digitalWrite(pin, LOW);
-    delay(200);
+  for(int i=0; i<times; i++) {
+    digitalWrite(pin, !digitalRead(pin));
+    delay(100);
+    digitalWrite(pin, !digitalRead(pin));
+    delay(100);
   }
 }

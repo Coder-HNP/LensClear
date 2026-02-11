@@ -13,7 +13,7 @@ const triggerSchema = new mongoose.Schema({
     },
     action: {
         type: String,
-        enum: ['start_motor', 'stop_motor', 'adjust_speed', 'run_cycle'],
+        enum: ['run_cycle', 'stop_motor'],
         required: true,
     },
     targetDevices: [{
@@ -38,14 +38,10 @@ const triggerSchema = new mongoose.Schema({
         },
     },
     parameters: {
-        speed: {
-            type: Number,
-            min: 0,
-            max: 255,
-        },
         duration: {
             type: Number, // seconds
         },
+        speed: Number,
         temperature: Number,
     },
     enabled: {

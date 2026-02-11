@@ -1,118 +1,76 @@
 import express from 'express';
-import { publishCommand } from '../services/mqttService.js';
-import Device from '../models/Device.js';
-import DetailedLog from '../models/DetailedLog.js';
-import { emitNewLog } from '../services/socketService.js';
+import { db } from '../firebase.js';
+import {
+    updateDoc,
+    doc,
+    serverTimestamp
+} from 'firebase/firestore';
 
 const router = express.Router();
 
+// Memory store for commands (Replaced Firestore for the local bridge)
+const pendingCommands = {};
+
 /**
- * POST /api/commands/send
- * Send a command to an ESP32 device
+ * GET /api/commands/:deviceId
+ * Polling endpoint for ESP32
  */
-router.post('/send', async (req, res) => {
-    try {
-        const userId = req.user?.uid || req.user?.id;
+router.get('/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
 
-        if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
+    if (pendingCommands[deviceId]) {
+        const cmd = pendingCommands[deviceId];
+        console.log(`[Relay] 🚀 Sending command to Hardware: ${cmd.command}`);
 
-        const { deviceId, command, parameters = {} } = req.body;
+        // Remove from queue after sending (one-time poll)
+        delete pendingCommands[deviceId];
 
-        // Validate required fields
-        if (!deviceId || !command) {
-            return res.status(400).json({ error: 'Device ID and command are required' });
-        }
-
-        // Verify device ownership
-        const device = await Device.findOne({ deviceId, userId });
-
-        if (!device) {
-            return res.status(404).json({ error: 'Device not found' });
-        }
-
-        // Check if device is online
-        if (device.status === 'offline') {
-            return res.status(400).json({
-                error: 'Device is offline',
-                deviceId,
-                status: device.status,
-            });
-        }
-
-        // Create log entry
-        const log = new DetailedLog({
-            deviceId,
-            deviceName: device.name,
-            action: command,
-            triggeredBy: userId,
-            status: 'pending',
-            timestamp: new Date(),
-        });
-
-        await log.save();
-
-        // Emit log to frontend
-        emitNewLog(log);
-
-        // Publish command via MQTT (Fire and forget)
-        try {
-            publishCommand(deviceId, command, parameters);
-        } catch (mqttError) {
-            console.warn('MQTT publish failed, relying on HTTP polling:', mqttError.message);
-        }
-
-        // Increment cleaning cycles if applicable
-        if (['run_cycle', 'restart', 'calibrate'].includes(command)) {
-            const updatedDevice = await Device.findOneAndUpdate(
-                { _id: device._id },
-                { $inc: { cleaningCycles: 1 } },
-                { new: true }
-            );
-
-            // Import dynamically to avoid circular dependency if any
-            const { emitDeviceUpdate } = await import('../services/socketService.js');
-            emitDeviceUpdate(deviceId, { cleaningCycles: updatedDevice.cleaningCycles });
-        }
-
-        res.json({
-            success: true,
-            message: 'Command queued successfully',
-            logId: log._id,
-        });
-    } catch (error) {
-        console.error('Error sending command:', error);
-        res.status(500).json({ error: 'Failed to send command' });
+        return res.json(cmd);
     }
+
+    res.status(404).json({ message: 'No pending commands' });
 });
 
 /**
- * GET /api/commands/:id/status
- * Check command execution status
+ * POST /api/commands/send
+ * Endpoint for the WEB APP to send commands
  */
-router.get('/:id/status', async (req, res) => {
-    try {
-        const userId = req.user?.uid || req.user?.id;
-        const { id } = req.params;
+router.post('/send', (req, res) => {
+    const { deviceId, command, params } = req.body;
 
-        const log = await DetailedLog.findOne({
-            _id: id,
-            triggeredBy: userId,
-        });
-
-        if (!log) {
-            return res.status(404).json({ error: 'Command log not found' });
-        }
-
-        res.json({
-            success: true,
-            log,
-        });
-    } catch (error) {
-        console.error('Error fetching command status:', error);
-        res.status(500).json({ error: 'Failed to fetch command status' });
+    if (!deviceId || !command) {
+        return res.status(400).json({ error: 'deviceId and command required' });
     }
+
+    // Queue the command in local memory
+    pendingCommands[deviceId] = {
+        id: `local_${Date.now()}`,
+        command,
+        parameters: params || {}
+    };
+
+    console.log(`[Relay] 📥 Queued command from Website: ${command} for ${deviceId}`);
+    res.json({ success: true, message: 'Command queued locally' });
+});
+
+/**
+ * POST /api/commands/ack
+ */
+router.post('/ack', async (req, res) => {
+    const { deviceId, commandId, success } = req.body;
+    console.log(`[Relay] ✅ Hardware Acknowledged: ${commandId} (Success: ${success})`);
+
+    // Log this event to Firestore via the Frontend Bridge
+    const { getIO } = await import('../services/socketService.js');
+    const io = getIO();
+    io.emit("proxy:create_log", {
+        deviceId: String(deviceId),
+        type: 'hardware',
+        action: success ? 'Hardware Acknowledged' : 'Hardware Failed Command',
+        details: `Command ID: ${commandId}`
+    });
+
+    res.json({ success: true });
 });
 
 export default router;

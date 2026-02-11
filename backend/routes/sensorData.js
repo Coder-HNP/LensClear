@@ -1,97 +1,59 @@
-
 import express from 'express';
-import Device from '../models/Device.js';
-import SensorData from '../models/SensorData.js';
-import { getIO } from '../services/socketService.js';
+import { emitSensorData, emitUnlinkedDevice, getIO } from '../services/socketService.js';
+import { trackDeviceHeartbeat } from '../services/statusMonitor.js';
 
 const router = express.Router();
-
-
-router.get('/', (req, res) => {
-    res.json({ message: 'Sensor Data API is active. Send POST request with data.' });
-});
-
 
 router.post('/', async (req, res) => {
     try {
         const { deviceId, authToken, temperature, rpm, vibration, status, power } = req.body;
 
-        if (!deviceId || !authToken) {
-            return res.status(400).json({ error: 'Missing deviceId or authToken' });
-        }
+        if (!deviceId) return res.status(400).json({ error: 'Missing deviceId' });
 
-        
-        const device = await Device.findOne({ deviceId });
+        console.log(`[Relay] Hardware Data via HTTP for ${deviceId} (${status})`);
 
-        if (!device) {
-            return res.status(404).json({ error: 'Device not found' });
-        }
-
-        if (device.authToken !== authToken) {
-            return res.status(401).json({ error: 'Invalid auth token' });
-        }
-
-        
-        const sensorData = new SensorData({
-            deviceId,
-            temperature,
-            rpm,
-            vibration,
-            powerConsumption: power,
-            timestamp: new Date()
+        // 1. INSTANT FEEDBACK (Real-time Gauge Vitals)
+        emitSensorData(deviceId, {
+            temperature: temperature || 0,
+            rpm: rpm || 0,
+            vibration: vibration || 0,
+            power: power || 0,
+            status: status || 'online'
         });
 
-        await sensorData.save();
-
-        
-        const previousStatus = device.status;
-
-        
-        device.lastSeen = new Date();
-        if (status) {
-            device.status = status === 'running' ? 'active' : (status === 'idle' ? 'idle' : 'online');
-        } else {
-            device.status = 'online';
-        }
-        await device.save();
-
-        
-        if (previousStatus === 'offline' && device.status !== 'offline') {
-            console.log(`📱 Device ${deviceId} came back online (was ${previousStatus})`);
-        }
-
-        
+        // 2. BROADCAST SYNC REQUEST (Proxy Mode)
         const io = getIO();
-        if (io) {
-           
-            io.to(`user:${device.userId}`).emit('sensor:data', {
-                deviceId,
-                data: {
-                    deviceId,
-                    name: device.name,
-                    status: device.status,
-                    temperature: sensorData.temperature,
-                    rpm: sensorData.rpm,
-                    vibration: sensorData.vibration,
-                    power: sensorData.powerConsumption,
-                    lastUpdate: sensorData.timestamp
-                }
-            });
+        const mappedStatus = status === 'running' ? 'active' : 'online';
 
-            
-            io.to(`user:${device.userId}`).emit('device:status', {
-                deviceId,
-                status: device.status,
-                lastSeen: device.lastSeen
-            });
-        }
+        io.emit("device:sync", {
+            deviceId,
+            payload: {
+                status: mappedStatus,
+                lastSeen: new Date(),
+                temperature: temperature || 0,
+                rpm: rpm || 0,
+                power: power || 0,
+                authToken: authToken || null
+            }
+        });
 
-        res.json({ success: true });
+        // 3. INTERNAL HEARTBEAT TRACKING (Proxy Mode)
+        // The memory-based status monitor in statusMonitor.js will track 
+        // this device once the Frontend dashboard registers the userId via 'proxy:track_heartbeat'.
+
+        // 3. BROADCAST LOG REQUEST
+        io.emit("proxy:create_log", {
+            deviceId,
+            type: 'sensor',
+            action: 'Status Update',
+            details: `Vitals - T: ${temperature || 0}, R: ${rpm || 0}`
+        });
+
+        res.json({ success: true, mode: 'proxy' });
     } catch (error) {
-        console.error('Error processing sensor data:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('[Relay] Error:', error.message);
+        res.status(500).json({ error: 'Bridge Relay Error' });
     }
 });
 
 export default router;
-

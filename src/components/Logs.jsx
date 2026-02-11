@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import { subscribeToLogs } from "../utils/firestoreAPI";
 
 const Logs = () => {
+    const { user } = useAuth();
     const [logs, setLogs] = useState([]);
 
     useEffect(() => {
-        const unsubscribe = subscribeToLogs(setLogs);
-        return unsubscribe;
-    }, []);
+        if (!user) return;
+        const unsubscribe = subscribeToLogs(user.uid, setLogs);
+        return () => unsubscribe();
+    }, [user]);
 
     return (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-full">
@@ -29,14 +32,17 @@ const Logs = () => {
                         ) : (
                             logs.map((log) => (
                                 <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                    <td className="px-4 py-3 text-gray-500">
-                                        {log.timestamp instanceof Date ? log.timestamp.toLocaleTimeString() : "Pending..."}
+                                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                                        {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString() :
+                                            (log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "Just now")}
                                     </td>
-                                    <td className="px-4 py-3 font-medium text-gray-800">{log.event}</td>
+                                    <td className="px-4 py-3 font-medium text-gray-800">
+                                        {log.action || log.event || "Unknown Action"}
+                                    </td>
                                     <td className="px-4 py-3">
                                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${log.type === 'error' ? 'bg-red-100 text-red-600' :
-                                                log.type === 'warning' ? 'bg-yellow-100 text-yellow-600' :
-                                                    'bg-blue-100 text-blue-600'
+                                            log.type === 'warning' ? 'bg-yellow-100 text-yellow-600' :
+                                                'bg-blue-100 text-blue-600'
                                             }`}>
                                             {log.type || 'info'}
                                         </span>
