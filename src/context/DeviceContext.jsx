@@ -20,7 +20,7 @@ const DeviceContext = createContext({
     refreshDevices: () => { }
 });
 
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
 export const useDevice = () => {
     const context = useContext(DeviceContext);
