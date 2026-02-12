@@ -13,6 +13,7 @@ import { initStatusMonitor } from './services/statusMonitor.js';
 import sensorDataRouter from './routes/sensorData.js';
 import commandsRouter from './routes/commands.js';
 import devicesRouter from './routes/devices.js';
+import logsRouter from './routes/logs.js';
 import authMiddleware from './middleware/auth.js';
 
 // Load environment variables
@@ -59,6 +60,7 @@ app.use('/api/commands', commandsRouter);
 // These require an Authorization: Bearer <token> header.
 // For now the auth middleware treats the token value itself as the user ID.
 app.use('/api/devices', authMiddleware, devicesRouter);
+app.use('/api/logs', authMiddleware, logsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
