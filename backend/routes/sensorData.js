@@ -37,9 +37,10 @@ router.post('/', async (req, res) => {
             }
         });
 
-        // 3. INTERNAL HEARTBEAT TRACKING (Proxy Mode)
-        // The memory-based status monitor in statusMonitor.js will track 
-        // this device once the Frontend dashboard registers the userId via 'proxy:track_heartbeat'.
+        // 3. INTERNAL HEARTBEAT TRACKING (Hardware-driven)
+        // Every sensor report is treated as a heartbeat. If the hardware stops
+        // sending data for a while, the in-memory monitor will mark it offline.
+        trackDeviceHeartbeat(deviceId);
 
         // 3. BROADCAST LOG REQUEST
         io.emit("proxy:create_log", {

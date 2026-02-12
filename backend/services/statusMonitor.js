@@ -4,17 +4,19 @@ import { getIO } from './socketService.js';
 
 let monitorInterval = null;
 
-// Memory Store: { deviceId: { lastSeen: Date, userId: string } }
+// Memory Store: { deviceId: { lastSeen: Date, userId?: string } }
 const activeDevices = new Map();
 
 /**
- * Update the memory map when a device checks in
+ * Update the memory map when a device checks in.
+ * userId is optional so that hardware can drive heartbeats
+ * even if the dashboard is not currently connected.
  */
 export function trackDeviceHeartbeat(deviceId, userId) {
-    if (!deviceId || !userId) return;
+    if (!deviceId) return;
     activeDevices.set(String(deviceId), {
         lastSeen: new Date(),
-        userId: String(userId)
+        userId: userId ? String(userId) : undefined
     });
 }
 
@@ -44,7 +46,7 @@ async function checkDeviceStatuses() {
                 activeDevices.delete(deviceId);
                 offlineCount++;
 
-                console.log(`📴 Device ${deviceId} (User: ${data.userId}) marked OFFLINE after ${Math.round(timeSinceLastSeen / 1000)}s`);
+                console.log(`📴 Device ${deviceId} (User: ${data.userId || 'N/A'}) marked OFFLINE after ${Math.round(timeSinceLastSeen / 1000)}s`);
 
                 // 1. Notify UI via Socket.io
                 try {
@@ -56,13 +58,20 @@ async function checkDeviceStatuses() {
                     });
                 } catch (e) { }
 
-                // 2. Mark Offline in Firestore (Optional: Dashboard usually handles this via Proxy Secretary)
-                // But we do it here as a backup
-                const deviceRef = doc(db, "users", data.userId, "devices", deviceId);
-                await updateDoc(deviceRef, {
-                    status: 'offline',
-                    updatedAt: serverTimestamp()
-                }).catch(e => console.log(`[StatusMonitor] Permission note: Cannot write offline for ${deviceId} directly. Waiting for Proxy Secretary.`));
+                // 2. Mark Offline in Firestore (Optional backup)
+                // Only attempt if we know the userId. In most cases the
+                // frontend "Proxy Secretary" will persist this instead.
+                if (data.userId) {
+                    const deviceRef = doc(db, "users", data.userId, "devices", deviceId);
+                    await updateDoc(deviceRef, {
+                        status: 'offline',
+                        updatedAt: serverTimestamp()
+                    }).catch(e =>
+                        console.log(
+                            `[StatusMonitor] Permission note: Cannot write offline for ${deviceId} directly. Waiting for Proxy Secretary.`
+                        )
+                    );
+                }
             }
         }
 

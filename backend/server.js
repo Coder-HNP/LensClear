@@ -12,6 +12,8 @@ import { initStatusMonitor } from './services/statusMonitor.js';
 // Import routes
 import sensorDataRouter from './routes/sensorData.js';
 import commandsRouter from './routes/commands.js';
+import devicesRouter from './routes/devices.js';
+import authMiddleware from './middleware/auth.js';
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +54,11 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/sensor-data', sensorDataRouter);
 app.use('/api/commands', commandsRouter);
+
+// Protected device management routes
+// These require an Authorization: Bearer <token> header.
+// For now the auth middleware treats the token value itself as the user ID.
+app.use('/api/devices', authMiddleware, devicesRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

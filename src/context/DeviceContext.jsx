@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { useAuth } from "./AuthContext";
 import {
     getUserDevices,
@@ -47,6 +47,7 @@ export const DeviceProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [unlinkedDevices, setUnlinkedDevices] = useState(new Set());
     const [socket, setSocket] = useState(null);
+    const lastSeenRef = useRef({});
 
     // 1. INITIALIZE SOCKET
     useEffect(() => {
@@ -146,10 +147,20 @@ export const DeviceProvider = ({ children }) => {
             const { deviceId, status } = data;
             const targetId = String(deviceId);
 
-            // Update UI
+            // Update currently selected device view
             if (targetId === String(selectedDeviceId)) {
                 setCurrentDeviceData(prev => ({ ...prev, status }));
             }
+
+            // Optimistically update device list in local state so the
+            // Devices page reflects offline status immediately
+            setDevices(prev =>
+                prev.map((device) =>
+                    String(device.id) === targetId
+                        ? { ...device, status }
+                        : device
+                )
+            );
 
             // Persist "Offline" status to user folder via bridge
             if (status === 'offline' && user) {
@@ -160,7 +171,20 @@ export const DeviceProvider = ({ children }) => {
 
         // Real-time UI updates (Vitals)
         socket.on("sensor:data", (data) => {
-            if (String(data.deviceId) === String(selectedDeviceId)) {
+            const targetId = String(data.deviceId);
+            // Record last seen timestamp for heartbeat-based offline detection
+            lastSeenRef.current[targetId] = new Date();
+
+            // Ensure the device is marked online when fresh data arrives
+            setDevices(prev =>
+                prev.map(device =>
+                    String(device.id) === targetId
+                        ? { ...device, status: 'online', lastOnline: new Date() }
+                        : device
+                )
+            );
+
+            if (targetId === String(selectedDeviceId)) {
                 setCurrentDeviceData(prev => ({ ...prev, ...data, lastUpdate: new Date() }));
             }
         });
@@ -173,6 +197,36 @@ export const DeviceProvider = ({ children }) => {
             socket.off("sensor:data");
         };
     }, [socket, user, devices, selectedDeviceId]);
+
+    // 4. FRONTEND HEARTBEAT WATCHER (Failsafe)
+    // If a device stops sending sensor:data events for a while, mark it offline on the UI.
+    useEffect(() => {
+        if (!user) return;
+
+        const OFFLINE_THRESHOLD_MS = 30000; // 30 seconds without data => offline
+        const CHECK_INTERVAL_MS = 10000; // check every 10 seconds
+
+        const intervalId = setInterval(() => {
+            const now = new Date();
+
+            setDevices(prev =>
+                prev.map(device => {
+                    const id = String(device.id);
+                    const lastSeen = lastSeenRef.current[id];
+
+                    if (lastSeen && now - lastSeen > OFFLINE_THRESHOLD_MS) {
+                        if (device.status !== 'offline') {
+                            return { ...device, status: 'offline' };
+                        }
+                    }
+
+                    return device;
+                })
+            );
+        }, CHECK_INTERVAL_MS);
+
+        return () => clearInterval(intervalId);
+    }, [user]);
 
     const value = {
         devices,
